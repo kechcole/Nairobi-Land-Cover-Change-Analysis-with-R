@@ -21,7 +21,7 @@ install.packages("tidyverse")
 # Load data. Landsat data used for an area covering the greater Nairobi region downloaded from Google Earth Engine.
 dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
 
-# Load raster data 
+# Load raster data , ind the coordinate reference system
 landsat_24 <- stack(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))
 crs(landsat_24)
 
@@ -29,12 +29,15 @@ crs(landsat_24)
 selected_bands <- stack(landsat_24[[2:7]])
 plot(selected_bands)
 
-# Reproject raster 
+# Reproject raster From Geographic -WGS 84 to a Projected 
 # You can use an EPSG code (32337 for UTM Zone 37S, WGS 84 datum) or a proj4string
 target_crs <- CRS("+init=EPSG:32337")
 
 # Step 3: Reproject the raster
 landsat_rpUTM <- projectRaster(selected_bands, crs = target_crs)
+# Check projection of new image 
+crs(landsat_rpUTM)
+# Plot reprojected image 
 plot(landsat_rpUTM, main = " Raster Bands Reprojected To UTM Images.")
 
 
