@@ -1,7 +1,7 @@
 '''
                     IMAGE CLASSIFICATION. 
 This is the process of assingning new land cover classes to an image resulting to thematic maps that 
-show land use maps. This activity on the reflactance value of different features, i.e a built up area
+show land use maps. This activity is based on the reflactance value of different features, i.e a built up area
 has different value a s compared to vegetative areas. By assigning classes, the image acquires new 
 labels / themes. Classification can be based on spectral values, spatial(textural and proximity) or 
 temporal imformation. The two kost commonly used methods are supervised and unsupervised, and have been in use 
@@ -55,7 +55,7 @@ library(ggplot2)    # ploting
 
 
 # Load multiband raster data 
-dataFolder <- "c:/Users/admin/Downloads/Nairobi Landsat data/"
+dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
 landsat_2023 <- stack(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))
 
 # Confirm multiband 

@@ -7,7 +7,7 @@ library(dplyr)       # data manipulation
 library(RStoolbox)   # ploting spatial data 
 library(RColorBrewer)# color
 library(ggplot2)     # ploting
-# library(sp)          # spatial data
+library(sp)          # spatial data
 library(sf)          # spatial data
 
 library(gridExtra)
@@ -24,6 +24,7 @@ dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
 # Load raster data , ind the coordinate reference system
 landsat_24 <- stack(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))
 crs(landsat_24)
+
 
 # Subset bands(BLUE, GREEN, RED, NIR,SWIR1,SWIR2) and plot 
 selected_bands <- stack(landsat_24[[2:7]])
@@ -42,21 +43,34 @@ plot(landsat_rpUTM, main = " Raster Bands Reprojected To UTM Images.")
 
 
 
-# Step 4. Load vector data and reproject to same CRS as raster 
+# Step 4. Load vector data and reproject to same CRS as raster
+# The raster image was digitized to 5 classes, 1-orest, 2-water, 3-builtup, 4-vegetation and 5-bare lands
+# The layer were then dissoled ased on their class id leading to 5 layers. 
+
 # Load geopackage using sf package , layer is train_2023
 polygon_layers <- st_layers(paste0(dataFolder, 'Nairobidata.gpkg'))
-polygon_layers
+plot(polygon_layers)
+
 
 # Load a single layer 
 polygon1 <- st_read(paste0(dataFolder, 'Nairobidata.gpkg'), layer = 'dissolved')
+
+# Metadata 
+polygon1
+
+# Projection 
 crs(polygon1)
 
+# Plot
+plot(st_geometries(polygon1))
+
 # Reproject to Pseudo Mercator, projected coordinate system that uses meters 
+# Same projection as raster 
 poly_rpUTM <- st_transform(polygon1, crs=32337) 
 crs(poly_rpUTM)
 
 
-#Step 4. 
+#Step 5. 
 # Choose attribute to be Plotted 
 attribute <- poly_rpUTM$Class_Name 
 
