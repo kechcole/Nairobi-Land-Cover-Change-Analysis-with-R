@@ -233,3 +233,7 @@ rm(list = ls())
 
 
 
+# REERENCES 
+# 1. https://zia207.github.io/geospatial-r-github.io/ground-truth-data-processing.html
+
+
