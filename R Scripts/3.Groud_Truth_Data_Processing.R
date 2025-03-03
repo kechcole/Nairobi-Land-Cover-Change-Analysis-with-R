@@ -22,42 +22,18 @@ install.packages("tidyverse")
 # Load data. Landsat data used for an area covering the greater Nairobi region downloaded from Google Earth Engine.
 dataFolder <- "E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/"
 
-# Load raster data , find the coordinate reference system
-landsat_23 <- stack(paste0(dataFolder, 'Landsat_8_2023_Proj.tif'))
+# Load raster data and create a terra stack , find the coordinate reference system
+landsat_23 <- rast(paste0(dataFolder, 'Landsat_8_2023_Proj.tif'))
+class(landsat_23)
 crs(landsat_23)       # A mecartor projection (3395)
 
 class(landsat_23)
 
 # Subset bands(BLUE, GREEN, RED, NIR,SWIR1,SWIR2) and plot 
-selected_bands <- stack(landsat_23[[2:7]])
+selected_bands <- landsat_23[[2:7]]
+# Confirm if oject is a stack, SpatRaster
+class(selected_bands)
 plot(selected_bands)
-
-
-
-
-naturalColour <-ggRGB(selected_bands, r=3, g=2, b=1, stretch = "lin")+
-      theme(axis.title.x=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            axis.title.y=element_blank(),
-            axis.text.y=element_blank(),
-            axis.ticks.y=element_blank())+
-      ggtitle("Natural Color\n (R= Red, G= Green, B= Blue)")
-    
-healthyVeg <- ggRGB(selected_bands, r=4, g=5, b=1, stretch = "lin")+
-      theme(axis.title.x=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            axis.title.y=element_blank(),
-            axis.text.y=element_blank(),
-            axis.ticks.y=element_blank())+
-      ggtitle("Healthy egetation\n (R= SWIR2, G= SWIR1,  B= Red)")
-    
-
-    
-grid.arrange(naturalColour, healthyVeg, nrow = 2)
-
-
 
 
 
@@ -113,27 +89,7 @@ crs
 
 
 
-# ----METHOD 1 : USING raster lirary, will be deprecated ----------------
-# Create a blank raster (define resolution of 20m and extent)
-# Define the raster resolution (in the units of the coordinate system)
-rast_template <- raster(extent, resolution=20, 
-        crs = "+proj=utm +zone=37 +south +ellps=WGS72 +units=m +no_defs")
-
-# Assign the extent of reprojected polygon to raster template 
-extent(rast_template) <- extent(poly_rpUTM)
-
-# Rasterize the polygon based on an attribute
-# Choose the attribute for rasterization MUST be a numeric function
-rp <- rasterize(poly_rpUTM, rast_template, 'Class_ID')
-
-# Plot 
-plot(rp, main="Rasterized Ground Truth Data")
-
-
-
-
-
-# -------- METHOD 2 : USING Tera package , modern  -----------
+# -------- USING Tera package , modern  -----------
 # rast(): Creates an empty raster template with the specified extent, resolution, and CRS.
 # ext(): Automatically extracts the extent from the polygon object.
 # crs: Assigns the EPSG code (use "EPSG:32237" for UTM Zone 37S with WGS72).
@@ -151,59 +107,129 @@ rp
 plot(rp, main = "Rasterized Polygon1", col = terrain.colors(10))
 
 
+# ------------------------
+# Converts SpatRaster to a data frame with coordinates
+rp.df <- as.data.frame(rp, xy = TRUE, cells = TRUE)  # xy = TRUE includes coordinates
+class(rp.df)
+colnames(rp.df)  # See what the column names are
 
-# Convert raster to data.frame and rename colum to “layer”" to Class_ID
-rp.df <- as.data.frame(rasterToPoints(rp))
-rp.df
- colnames(rp.df)[3] <- 'Class_ID'
+# Rename the raster value column to "Class_ID" which are raster values (from the attribute column)
+colnames(rp.df)[4] <- "Class_ID"
+colnames(rp.df)
 
-#  Create a Spatial point Data frame
- xy <- rp.df[,c(1,2)]          # Subset rp dataframe and fetch columns containing  xy values
- point.SPDF <- SpatialPointsDataFrame(coords = xy,
-                                 data=rp.df,
-                                 proj4string = CRS("+proj=utm +zone=37 +south +ellps=WGS72 +datum=WGS84 +units=m +no_defs"))
+# Create a SpatVector of points from the data frame
+xy <- rp.df[, c("x", "y")]  # Subset coordinates
+# Creates a SpatVector point object from coordinate data.
+point.SPDF <- vect(xy, geom = c("x", "y"),
+             crs = crs(rp))     # Automatically assigns the CRS from the original raster
+point.SPDF
+
+# Add a new column since there are no attributes as shown above in dimensions 
+point.SPDF$Class_ID <- rp.df$Class_ID  # Assign attribute values
+
+
+
 
 
 # -------------------------------------------------------------------
 # Extract data from a remote sensed image 
 
 # Plot natural colour and false urban colour
-nlayers(landsat_rpUTM)
-names(landsat_rpUTM)
-ncell(landsat_rpUTM)
+nlayers(selected_bands)
+names(selected_bands)
+ncell(selected_bands)
 
-naturalColour <-ggRGB(landsat_rpUTM, r=3, g=2, b=1, stretch = "lin")+
-        theme(axis.title.x=element_blank(),
-              axis.text.x=element_blank(),
-              axis.ticks.x=element_blank(),
-              axis.title.y=element_blank(),
-              axis.text.y=element_blank(),
-              axis.ticks.y=element_blank())+
-        ggtitle("Natural Color\n (R= Red, G= Green, B= Blue)")
-
-falseColourUrb <- ggRGB(landsat_23, r=6, g=5, b=3, stretch = "lin")+
-        theme(axis.title.x=element_blank(),
-              axis.text.x=element_blank(),
-              axis.ticks.x=element_blank(),
-              axis.title.y=element_blank(),
-              axis.text.y=element_blank(),
-              axis.ticks.y=element_blank())+
-        ggtitle("False Color Urban \n (R= SWIR2, G= SWIR1,  B= Red)")
-
-
-healthyVeg <- ggRGB(landsat_23, r=5, g=6, b=2, stretch = "lin")+
+naturalColour <-ggRGB(selected_bands, r=3, g=2, b=1, stretch = "lin")+
       theme(axis.title.x=element_blank(),
             axis.text.x=element_blank(),
             axis.ticks.x=element_blank(),
             axis.title.y=element_blank(),
             axis.text.y=element_blank(),
             axis.ticks.y=element_blank())+
-      ggtitle("Healthy Vegetation \n (R= NIR, G= SWIR1,  B= Green)")
+      ggtitle("Natural Color\n (R= Red, G= Green, B= Blue)")
+    
+healthyVeg <- ggRGB(selected_bands, r=4, g=5, b=1, stretch = "lin")+
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank(),
+            axis.title.y=element_blank(),
+            axis.text.y=element_blank(),
+            axis.ticks.y=element_blank())+
+      ggtitle("Healthy egetation\n (R= SWIR2, G= SWIR1,  B= Red)")
+    
 
-grid.arrange(naturalColour, healthyVeg, falseColourUrb, nrow = 2)
+    
+grid.arrange(naturalColour, healthyVeg, nrow = 2)
+
 
 # Extract raster values that intersect with each layer to points file 
-point.df <- raster::extract(landsat_rpUTM, point.SPDF, df=TRUE, method='simple')
-
+# extract(): Works on SpatRaster objects with SpatVector points.
+# bind = TRUE: Merges the extracted values with the point attribute table.
+point.df <- extract(selected_bands, point.SPDF, bind = TRUE, method = "simple")
 
 point.df
+
+# Combine with data frame
+point.mf<-cbind(rp.df,point.df)
+
+# Datarame characteristics
+head(point.mf)
+class(point.mf)     
+str(point.mf)                # structure of the dataframe
+colnames(point.mf)            # columns available 
+unique(point.df$Class_ID)        # Unique values 
+sum(is.na(point.df))           # missing alues 
+
+
+# Create a new column that add class type name 
+point.mf$LandUseClass <- ifelse(point.mf$Class_ID == 1, 'forest' , 
+                         ifelse(point.mf$Class_ID == 2, 'water' , 
+                         ifelse(point.mf$Class_ID == 3, 'builtup', 
+                         ifelse(point.mf$Class_ID == 4, 'vegetation',
+                         ifelse(point.mf$Class_ID == 5, 'bare',
+                                  NA
+                              )))))
+
+# Check new column and conirm no missing vlues 
+colnames(point.mf)
+unique(point.mf$LandUseClass)
+str(point.mf)
+
+# Remove duplicate column using dplyr
+cleanData <- point.mf %>%
+                  select(-5)
+colnames(cleanData)
+
+# Save as csv
+write.csv(cleanData, paste0(dataFolder, '.\\pointsData.csv'))
+
+
+# -------------------------------------------------------------------------
+# Randomly split data into training(70%) and test(30%) datasets using CARET(
+# short for _C_classification _A_nd _RE_regression _T_raining) package
+library(caret)
+
+# import csv
+data <- read.csv("E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/pointsData.csv")
+str(data)
+
+# Set seed for replication and split data 
+set.seed(78)
+
+trainIndex <- createDataPartition(data$LandUseClass,   # target variable (factor)
+                                    p = .7, 
+                                    list=FALSE,
+                                    time = 1)
+
+train <- data[trainIndex, ]
+test <- data[-trainIndex, ]
+# Export as csv
+write.csv(train, paste0(dataFolder, '.\\trainingData.csv'), row.names=F)
+write.csv(test, paste0(dataFolder, '.\\testData.csv'), row.names=F)
+
+# CLAEAN THE ENTIRE ENVIROMENT 
+rm(list = ls())
+
+
+
+
