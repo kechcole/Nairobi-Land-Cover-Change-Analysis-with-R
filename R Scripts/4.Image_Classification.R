@@ -73,7 +73,7 @@ unsupClass_08 <- unsuperClass(landsat_2023,      # raster image
                         nStarts = 5)      # Number of random starts for kmeans algorithm
 
 # Plot map 
-colours <- colorRampPalette(c("white", "dark grey", "darkgreen","green", "light blue", "yellow", "red", "blue", "magnenta"))
+colours <- colorRampPalette(c("white", "dark grey", "darkgreen","green", "light blue", "yellow", "red", "blue", "orange"))
 spplot(unsupClass_08$map,    # Object 
       main="Unsupervised K-Classificantion with 8 Classes" ,   # Tilte  
       # Legend apperance and behaviour 
