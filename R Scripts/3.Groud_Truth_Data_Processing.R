@@ -22,7 +22,6 @@ install.packages("tidyverse")
 # Load data. Landsat data used for an area covering the greater Nairobi region downloaded from Google Earth Engine.
 dataFolder <- "E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/"
 
-panBand <- rast()
 # Load raster data and create a terra stack , find the coordinate reference system
 landsat_23 <- rast(paste0(dataFolder, 'Landsat_8_2023_Proj.tif'))
 class(landsat_23)
