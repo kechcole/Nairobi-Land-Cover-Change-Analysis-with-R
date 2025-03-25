@@ -34,7 +34,7 @@ I will delve into two major ones : supervided and supervised since they are comm
 
 
         Unsupervised classification. 
-This algorithm does not have any prio knowledge of the data and uses pixel properties such as simmilaries or differences in radiance value
+This algorithm does not have any prior knowledge of the data and uses pixel properties such as simmilaries or differences in radiance value
 to design clusters that minimises feature variation and maximises class separation. One huge advantage over supervised classification is 
 that the algorith is able to reveal hidden patterns that human capacity easily ignores. Conversly, is fall short of meeting user 
 as in may require expert knowledge to interpret. 
@@ -124,6 +124,7 @@ takes the day. Each tree
 
 '''
 
+# Install new packages
 packages <- c("randomForest", "plyr", "RStoolbox", "RColorBrewer", "doParallel")
 
 ipak <- function(pkg){
