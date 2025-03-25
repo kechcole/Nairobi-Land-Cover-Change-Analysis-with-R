@@ -150,6 +150,79 @@ library(sp)           # spatial data
 library(doParallel)   # Parallel processing
 
 
+# Load data 
+train.df<-read.csv("E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/trainingData.csv", header = T)
+test.df<-read.csv("E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/testData.csv", header = T)
+
+# Randomly select 5% of each data making it lighter for the machine 
+train.df <- train.df %>% sample_frac(.05)
+test.df <- test.df %>% sample_frac(.05)
+
+names(train.df)
+
+# -------------------------------------------------------------
+# Train  a Random Forest Classiication using caret package 
+# -------------------------------------------------------------
+
+# 1. Set up parallelization to increase eiciency y quickly running loops and obtaining outputs fast 
+# because the data we using is large 
+mc <- makeCluster(detectCores())
+registerDoParallel(mc)
+
+# 2. Set seed the model can be reproduced later 
+set.seed(120)
+
+# Define hyperparameters or the Random forest function 
+# These settings will guide how the model is trained and validated , it includes the resampling method 
+# number of folds for validation, numer of times the cross validation is repeated, whether parralelization 
+# is allowed
+myControl <- trainControl( # Split data multiple times into training datasets 
+                           method="repeatedcv", 
+                           # Numebr of cross validation folds
+                          number=3, 
+                          # repeat cross validation 
+                          repeats=2,
+                          # Retain sampling results for all training in order to know how well it performed in each
+                          returnResamp='all', 
+                          # Enable parallel processing to speed up training and improve results 
+                          allowParallel=TRUE)
+
+# 3. Train model 
+fit.rf <- train(  # Convert target variale into a cartegorical variale, predictor variables are B2-B7 
+                  as.factor(LandUseClass)~SR_B2 + SR_B3 + SR_B4+ SR_B4 + SR_B6 + SR_B7, 
+                data=train.df,     # Training dataset containing variables 
+                method = "rf",     # Random forest classifier method 
+                metric= "Accuracy",    # model evaluation method 
+                preProc = c("center", "scale"),   # Standardize and center the data 
+                trControl = myControl      # training control setting 
+                )
+fit.rf
+
+# Stop cluster 
+stopCluster(mc)
+
+# 4. Evaluate the model in the training dataset by predicting land use class on train data 
+#  using the model and computing the confusion matrix(compares actual values and predicted ones )
+# 
+p1<-predict(fit.rf,      # Model to e adopted 
+            train.df,    # data to predict 
+            type = "raw")    # Return raw values rather probailities
+
+# Compare predicted p1 values with classes in train data 
+train.df$LandUseClass <- as.factor(train.df$LandUseClass)
+confusionMatrix(p1, train.df$LandUseClass)
+
+
+# 5. Predict on unseen test data
+p2 <- predict(fit.rf, test.df)
+
+# Compare predicted p1 values with classes in test data 
+test.df$LandUseClass <- as.factor(test.df$LandUseClass)
+confusionMatrix(p2, test.df$LandUseClass)
+
+
+
+
 
 
 
