@@ -256,4 +256,9 @@ plot(var_imp, main = "Variable Importance (Caret Random Forest)")
 
 
 
+# ----------------------------------------------------------
+# Feature Engineering 
+# ----------------------------------------------------------
+#  Add more variales and study the effect on the model  
+
 
