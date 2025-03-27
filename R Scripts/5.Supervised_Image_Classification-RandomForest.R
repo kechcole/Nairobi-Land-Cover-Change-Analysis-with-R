@@ -49,9 +49,9 @@ library(randomForest) # Random Forest
 library(raster)       # raster processing
 # library(plyr)         # data manipulation 
 library(dplyr)        # data manipulation 
-library(RStoolbox)    # ploting spatial data 
+# library(RStoolbox)    # ploting spatial data 
 # library(RColorBrewer) # color
-library(ggplot2)      # ploting
+# library(ggplot2)      # ploting
 # library(sp)           # spatial data
 library(doParallel)   # Parallel processing
 
@@ -184,8 +184,6 @@ terra::plotRGB(landsat_clipped, r=3, g=2, b=1, stretch="lin", smooth=FALSE, axes
 grided.data <- as.data.frame(landsat_clipped, xy=TRUE)
 str(grided.data)
 
-# View first few rows
-head(grided.data)
 
 
 # Load random forest model and fit at grid location 
@@ -224,10 +222,25 @@ r <- rast(ext(sf_data), resolution = 30, crs = "EPSG:3395")
 rasterized <- rasterize(sf_data, r, field = "Class_ID")
 
 
+# ---------------------------------------------------------------
+# Plot 
+# ------------------------------------------------------------------
+# base plot
 plot(rasterized, main = "Rasterized Data", legend = FALSE, 
       col = c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520"))
+    
 
-legend("topright", inset = c(-0.2, 0),  # Moves legend outside on the right
-        legend = c("Vegetation", "Water", "Built-up", "Grassland", "Bare Land"),  
-        fill = c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520"), 
-        title = "Class Value", xpd = TRUE, bty = "n")
+
+# Plot with tmap
+# Define class labels and matching colors
+class_labels <- c("Vegetation", "Water", "Built-up", "Grassland", "Bare Land")
+class_colors <- c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520")
+
+# Assign raster categories explicitly
+levels(rasterized1) <- data.frame(ID = 1:5, Class = class_labels)
+
+# Create the map with a properly positioned legend
+tm_shape(rasterized) +
+  tm_raster(palette = class_colors, title = "Class Value", style = "cat") +  
+  tm_layout(legend.outside = TRUE, legend.outside.position = "right") +
+  tm_add_legend(type = "fill", labels = class_labels, col = class_colors)
