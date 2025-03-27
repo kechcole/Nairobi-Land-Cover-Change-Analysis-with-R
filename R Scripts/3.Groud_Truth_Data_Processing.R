@@ -59,9 +59,6 @@ class(polygon1)
 # Projection 
 crs(polygon1)
 
-# Plot
-plot(st_geometries(polygon1))
-
 
 
 #Step 5. 
