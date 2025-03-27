@@ -1,97 +1,3 @@
-'''
-                    IMAGE CLASSIFICATION. 
-This is the process of assingning new land cover classes to an image resulting to thematic maps that 
-show land use maps. This activity is based on the reflactance value of different features, i.e a built up area
-has different value a s compared to vegetative areas. By assigning classes, the image acquires new 
-labels / themes. Classification can be based on spectral values, spatial(textural and proximity) or 
-temporal imformation. The two kost commonly used methods are supervised and unsupervised, and have been in use 
-for a long time. Imprtant to note, they are pixel based and dependent on spectaral information, DN values. 
-
-          Procedure of classification. 
-1. Image Preprocessing. Includes corrections i.e radiometric(missmatch between energy being emmited and one received), 
-   atmospheric(radiance scattering/absorption), topographic, image enhancement, or sometimes clustering analysis, 
-   geometric(incorrect coordinates). 
-2. Design a classification scheme. Based of ground truth from field survey or other ancilliary data, infor 
-   about ground features such as agriculture, built areas is determined. 
-3. Create training areas. Representative areas of the image is created either through an earlier classification
-   algorith(unsupervised) or manually developing training signatures through digitization. 
-4. Run a classification algorithm. 
-5. Post processing. Techniques aimed at improving the accuracy of an image thus raising value of infor generated from 
-   an image. This includes image enhancement, orthorectification(horizontal accuracy using GCPs), spectral analysis to reveal hidden 
-   information.  
-6. Accuracy assesment. Checks the accuracy of your model by comparing ground truth and values generated.
-
-          Image Classification Techniques. 
-Remote sensing has a wide array of classifications groups based on characteristic of underlying algorithm. They include 
-    a) Parametric and non-parametric techniques - one uses assumptions on data while the other ignores. 
-    b) Hard or soft. Hard technique is where each pixel is assigned a class leading to data loss in cases where there are 
-       a pixel can represent more than one class while the later allows pixels to have more than one classes, it assumes the 
-       real world pattern where features are heterogenious. In soft a pixel is assigned a portion of the cover type it represents.
-    c) Supervised and unsupervised classification. 
-    d) Hybrid technique combines multiple other techniques by leveraging on AI and expert systems to improve on their deficiencies. 
-
-I will delve into two major ones : supervided and supervised since they are commonly used and have been explored widely. 
-
-
-        Unsupervised classification. 
-This algorithm does not have any prior knowledge of the data and uses pixel properties such as simmilaries or differences in radiance value
-to design clusters that minimises feature variation and maximises class separation. One huge advantage over supervised classification is 
-that the algorith is able to reveal hidden patterns that human capacity easily ignores. Conversly, is fall short of meeting user 
-as in may require expert knowledge to interpret. 
-
-
-'''
-# ---------------------------------------------------------------------------------
-#                    Section 1 : UNSUPERVISED CLASSIFICATION.
-#----------------------------------------------------------------------------------
-
-# Load Libraries 
-library(raster)      # raster data
-library(rasterVis)  # raster visualisation  
-library(sp)         # Spatial data processing           
-# library(rgdal)      # Spatial data processing
-library(RStoolbox)  # Image analysis
-library(ggplot2)    # ploting
-
-
-# Load multiband raster data 
-dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
-landsat_2023 <- stack(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))
-
-# Confirm multiband 
-landsat_2023
-
-# K-means Clustering using 8 classes. 
-
-# Set seed for easy duplication
-set.seed(4)
-
-# Run algorithm 
-unsupClass_08 <- unsuperClass(landsat_2023,      # raster image
-                        nSamples = 100,   # Number of random samples to draw to fit cluster map 
-                        nClasses= 8,      # Number of classes  
-                        nStarts = 5)      # Number of random starts for kmeans algorithm
-
-# Plot map 
-colours <- colorRampPalette(c("white", "dark grey", "darkgreen","green", "light blue", "yellow", "red", "blue", "orange"))
-spplot(unsupClass_08$map,    # Object 
-      main="Unsupervised K-Classificantion with 8 Classes" ,   # Tilte  
-      # Legend apperance and behaviour 
-      colorkey = list(space="right",    # Position 
-                      tick.number=1,height=1, width=1,  # Size 
-                      # cex controls text label size, 
-                      labels = list(at = 1:8, labels = paste("Class", 1:8), cex = 1.2)),
-      col.regions=terrain.colors(8), 
-      cut=7)  # 7 intervals has 8 classes 
-
-# Save the image on disk 
-writeRaster(unsupClass_08$map, filename=paste0(dataFolder, 'Unsup_Kmeans.tif'), format="GTiff", overwrite=TRUE)
-
-print(paste0(dataFolder, 'Unsup_Kmeans.tif'))
-
-
-
-
 ''' ---------------------------------------------------------------------------------
                     Section 2 : SUPERVISED CLASSIFICATION.
 Using a set of pre-labelled sample data, an analyst trains a classifier that will then use knowledge learnt to classify an image.
@@ -125,7 +31,7 @@ takes the day. Each tree
 '''
 
 # Install new packages
-packages <- c("randomForest", "plyr", "RStoolbox", "RColorBrewer", "doParallel")
+packages <- c("randomForest", "plyr", "RStoolbox", "RColorBrewer", "doParallel", "tmap")
 
 ipak <- function(pkg){
    new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
@@ -141,24 +47,30 @@ library(caret)        # machine laerning
 library(randomForest) # Random Forest
 # library(rgdal)        # spatial data processing
 library(raster)       # raster processing
-library(plyr)         # data manipulation 
+# library(plyr)         # data manipulation 
 library(dplyr)        # data manipulation 
 library(RStoolbox)    # ploting spatial data 
 library(RColorBrewer) # color
 library(ggplot2)      # ploting
-library(sp)           # spatial data
+# library(sp)           # spatial data
 library(doParallel)   # Parallel processing
+
+library(sf)
+library(terra)
+library(tmap)
+
 
 
 # Load data 
 train.df<-read.csv("E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/trainingData.csv", header = T)
 test.df<-read.csv("E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/testData.csv", header = T)
 
-# Randomly select 5% of each data making it lighter for the machine 
-train.df <- train.df %>% sample_frac(.05)
-test.df <- test.df %>% sample_frac(.05)
+# Randomly select 10% of each data making it lighter for the machine 
+train.df <- train.df %>% sample_frac(.1)
+test.df <- test.df %>% sample_frac(.1)
 
 names(train.df)
+
 
 # -------------------------------------------------------------
 # Train  a Random Forest Classiication using caret package 
@@ -201,6 +113,11 @@ fit.rf
 # Stop cluster 
 stopCluster(mc)
 
+# Save model 
+saveRDS(fit.rf, paste0(dataFolder,"RandomFores.rds"))
+
+
+
 # 4. Evaluate the model in the training dataset by predicting land use class on train data 
 #  using the model and computing the confusion matrix(compares actual values and predicted ones )
 # 
@@ -221,21 +138,101 @@ test.df$LandUseClass <- as.factor(test.df$LandUseClass)
 confusionMatrix(p2, test.df$LandUseClass)
 
 
+# -------------------------------------------------------------------------------
+# Lets predict at grid location , data contains spatial points
+# terra and sf packages used 
+# --------------------------------------------------------------------------
+# Get raster values as csv
+dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
+landsat_2023 <- rast(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))
+
+landsat_2023
+# Number of layers, names, 
+nlyr(landsat_2023)
+names(landsat_2023)
+
+# Reproject to EPSG:3395 (World Mercator)
+reprojectedLandsat <- project(landsat_2023, "EPSG:3395")
+reprojectedLandsat
+crs(reprojectedLandsat)
+
+# Select bands used in predicting model, band 2-7. 
+landsat <- subset(reprojectedLandsat, c("SR_B2", "SR_B3","SR_B4", "SR_B5", "SR_B6", "SR_B7"))
+landsat
+
+# Convert raster to a data frame with coordinates , each cell value in all bands are captured
+grided.data <- as.data.frame(landsat, xy=TRUE)
+str(grided.data)
+# View first few rows
+head(grided.data)
+
+# Load and Predict at grid location 
+fit.rf <- readRDS(paste0(dataFolder,"RandomFores.rds"))
+p3 <- as.data.frame(predict(fit.rf, grided.data))
+
+
+# Extract predicted landuse class contained in a column and append to datarame
+grided.data$PredLandUse <- p3$predict
+
+
+
+
+
+# Get class id  
+grid.data <- grided.data %>% 
+                     mutate(Class_ID = case_when(
+                              PredLandUse == "water" ~ 2,
+                              PredLandUse == "vegetation" ~ 4,
+                              PredLandUse == "builtup" ~ 3,
+                              PredLandUse == "bare" ~ 5,
+                              TRUE ~ 1      # forest
+                           ))
+
+names(grid.data)
+
+# --------------------------------------
+# RASTERIZATIN with terra & sf
+# Convert to sf object (if not already)
+sf_data <- st_as_sf(grid.data, coords = c("x", "y"), crs = 3395)
+names(sf_data)
+
+# Define raster extent and resolution
+r <- rast(ext(sf_data), resolution = 15, crs = "EPSG:3395")  # Adjust resolution as needed
+
+# Rasterize using the first column of data (change "value" to your column name)
+rasterized <- rasterize(sf_data, r, field = "Class_ID", fun = mean)  # Use mean, sum, etc.
+
+# Plot rasterd
+plot(rasterized, main = "Rasterized Data", legend = TRUE, col = terrain.colors(10))
+
+# Add legend manually (optional, for more customization)
+legend("topright", legend = seq(min(values(rasterized), na.rm = TRUE), 
+                                max(values(rasterized), na.rm = TRUE), 
+                                length.out = 5),
+       fill = terrain.colors(5), title = "Value")
+
+
+# Convert raster to terra format if needed
+r_terra <- rast(r)
+
+# Define a categorical classification
+tm_shape(r_terra) +
+  tm_raster("Class_ID", palette = c("light grey", "burlywood4", "forestgreen", 
+                                    "light green", "dodgerblue"), 
+            title = "Land Use Classification") +
+  tm_layout(legend.position = c("right", "center"))
 
 
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+# Color Palette
+myPalette <- colorRampPalette(c("light grey","burlywood4", "forestgreen","light green", "dodgerblue"))
+# Plot Map
+LU<-spplot(r,"Class_ID", main="Supervised Image Classification: Random Forest" , 
+      colorkey = list(space="right",tick.number=1,height=1, width=1.5,
+              labels = list(at = seq(1,4.8,length=5),cex=1.0,
+              lab = c("Road/parking/pavement" ,"Building", "Tree/buses", "Grass", "Water"))),
+              col.regions=myPalette,cut=4)
+LU

@@ -174,7 +174,7 @@ point.df <- extract(selected_bands, point.SPDF, bind = TRUE, method = "simple")
 
 point.df
 
-# Combine with data frame
+# Combine with data frame along columns 
 point.mf<-cbind(rp.df,point.df)
 
 # Datarame characteristics
