@@ -50,7 +50,7 @@ library(raster)       # raster processing
 # library(plyr)         # data manipulation 
 library(dplyr)        # data manipulation 
 library(RStoolbox)    # ploting spatial data 
-library(RColorBrewer) # color
+# library(RColorBrewer) # color
 library(ggplot2)      # ploting
 # library(sp)           # spatial data
 library(doParallel)   # Parallel processing
@@ -138,47 +138,67 @@ test.df$LandUseClass <- as.factor(test.df$LandUseClass)
 confusionMatrix(p2, test.df$LandUseClass)
 
 
+
 # -------------------------------------------------------------------------------
 # Lets predict at grid location , data contains spatial points
 # terra and sf packages used 
 # --------------------------------------------------------------------------
-# Get raster values as csv
+# Read raster and vector data as terra ojects 
 dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
-landsat_2023 <- rast(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))
 
-landsat_2023
-# Number of layers, names, 
+landsat_2023 <- rast(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))   # Raster objects
+# Number of layers, names, in raster ile 
 nlyr(landsat_2023)
 names(landsat_2023)
+
+aoi <- vect(paste0(dataFolder, 'Nairobidata.gpkg'), layer="AOI")    # vector object
+aoi
+
+
 
 # Reproject to EPSG:3395 (World Mercator)
 reprojectedLandsat <- project(landsat_2023, "EPSG:3395")
 reprojectedLandsat
-crs(reprojectedLandsat)
+
+aoi <- project(aoi,  "EPSG:3395")
+aoi
+crs(aoi)
+
 
 # Select bands used in predicting model, band 2-7. 
 landsat <- subset(reprojectedLandsat, c("SR_B2", "SR_B3","SR_B4", "SR_B5", "SR_B6", "SR_B7"))
 landsat
 
-# Convert raster to a data frame with coordinates , each cell value in all bands are captured
-grided.data <- as.data.frame(landsat, xy=TRUE)
+# Mask the landsat image on the Area of Interest(clipping)
+landsat_clipped <- crop(landsat, aoi)  # Crop to bounding box
+landsat_clipped <- mask(landsat, aoi)  # Mask to exact shape
+landsat_clipped <- terra::trim(landsat_clipped) # Remove missing values for original areas not within the aoi
+
+
+# Plot as RGB image
+terra::plotRGB(landsat_clipped, r=3, g=2, b=1, stretch="lin", smooth=FALSE, axes=TRUE)  # Linear stretch
+
+
+# Convert raster to a data frame with coordinates, each cell value in all bands 
+# are captured
+grided.data <- as.data.frame(landsat_clipped, xy=TRUE)
 str(grided.data)
+
 # View first few rows
 head(grided.data)
 
-# Load and Predict at grid location 
-fit.rf <- readRDS(paste0(dataFolder,"RandomFores.rds"))
-p3 <- as.data.frame(predict(fit.rf, grided.data))
+
+# Load random forest model and fit at grid location 
+model.rf <- readRDS(paste0(dataFolder,"RandomFores.rds"))
+p3 <- as.data.frame(predict(model.rf, grided.data))
 
 
 # Extract predicted landuse class contained in a column and append to datarame
 grided.data$PredLandUse <- p3$predict
+str(grided.data)
 
 
-
-
-
-# Get class id  
+# Get class id , a new column containing class ID of the predicted values 
 grid.data <- grided.data %>% 
                      mutate(Class_ID = case_when(
                               PredLandUse == "water" ~ 2,
@@ -190,49 +210,24 @@ grid.data <- grided.data %>%
 
 names(grid.data)
 
+
 # --------------------------------------
-# RASTERIZATIN with terra & sf
-# Convert to sf object (if not already)
+# RASTERIZATIoN with terra & sf
+# -------------------------------------
+# Convert to sf object , coordinates x & y will be put to geometry column 
 sf_data <- st_as_sf(grid.data, coords = c("x", "y"), crs = 3395)
 names(sf_data)
 
-# Define raster extent and resolution
-r <- rast(ext(sf_data), resolution = 15, crs = "EPSG:3395")  # Adjust resolution as needed
+# Define raster extent and resolution similar to landsat image 
+r <- rast(ext(sf_data), resolution = 30, crs = "EPSG:3395")
 
-# Rasterize using the first column of data (change "value" to your column name)
-rasterized <- rasterize(sf_data, r, field = "Class_ID", fun = mean)  # Use mean, sum, etc.
-
-# Plot rasterd
-plot(rasterized, main = "Rasterized Data", legend = TRUE, col = terrain.colors(10))
-
-# Add legend manually (optional, for more customization)
-legend("topright", legend = seq(min(values(rasterized), na.rm = TRUE), 
-                                max(values(rasterized), na.rm = TRUE), 
-                                length.out = 5),
-       fill = terrain.colors(5), title = "Value")
+rasterized <- rasterize(sf_data, r, field = "Class_ID")
 
 
-# Convert raster to terra format if needed
-r_terra <- rast(r)
+plot(rasterized, main = "Rasterized Data", legend = FALSE, 
+      col = c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520"))
 
-# Define a categorical classification
-tm_shape(r_terra) +
-  tm_raster("Class_ID", palette = c("light grey", "burlywood4", "forestgreen", 
-                                    "light green", "dodgerblue"), 
-            title = "Land Use Classification") +
-  tm_layout(legend.position = c("right", "center"))
-
-
-
-
-
-
-# Color Palette
-myPalette <- colorRampPalette(c("light grey","burlywood4", "forestgreen","light green", "dodgerblue"))
-# Plot Map
-LU<-spplot(r,"Class_ID", main="Supervised Image Classification: Random Forest" , 
-      colorkey = list(space="right",tick.number=1,height=1, width=1.5,
-              labels = list(at = seq(1,4.8,length=5),cex=1.0,
-              lab = c("Road/parking/pavement" ,"Building", "Tree/buses", "Grass", "Water"))),
-              col.regions=myPalette,cut=4)
-LU
+legend("topright", inset = c(-0.2, 0),  # Moves legend outside on the right
+        legend = c("Vegetation", "Water", "Built-up", "Grassland", "Bare Land"),  
+        fill = c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520"), 
+        title = "Class Value", xpd = TRUE, bty = "n")
