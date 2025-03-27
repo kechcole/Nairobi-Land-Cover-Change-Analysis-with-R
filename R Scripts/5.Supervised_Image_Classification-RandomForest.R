@@ -244,3 +244,16 @@ tm_shape(rasterized) +
   tm_raster(palette = class_colors, title = "Class Value", style = "cat") +  
   tm_layout(legend.outside = TRUE, legend.outside.position = "right") +
   tm_add_legend(type = "fill", labels = class_labels, col = class_colors)
+
+
+# --------------------------------------------------
+# variable importance 
+# ----------------------------------------------------------
+# Extract and plot importance
+# Extract and plot importance
+var_imp <- varImp(model.rf)
+plot(var_imp, main = "Variable Importance (Caret Random Forest)")
+
+
+
+
