@@ -44,7 +44,7 @@ ipak <- function(pkg){
 ipak((packages))
 
 library(caret)        # machine laerning
-library(randomForest) # Random Forest
+# library(randomForest) # Random Forest
 # library(rgdal)        # spatial data processing
 library(raster)       # raster processing
 # library(plyr)         # data manipulation 
