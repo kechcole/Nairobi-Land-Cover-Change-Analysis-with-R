@@ -44,15 +44,9 @@ ipak <- function(pkg){
 ipak((packages))
 
 library(caret)        # machine laerning
-# library(randomForest) # Random Forest
-# library(rgdal)        # spatial data processing
 library(raster)       # raster processing
-# library(plyr)         # data manipulation 
 library(dplyr)        # data manipulation 
-# library(RStoolbox)    # ploting spatial data 
-# library(RColorBrewer) # color
-# library(ggplot2)      # ploting
-# library(sp)           # spatial data
+library(ggplot2)      # ploting
 library(doParallel)   # Parallel processing
 
 library(sf)
@@ -90,7 +84,7 @@ set.seed(120)
 # is allowed
 myControl <- trainControl( # Split data multiple times into training datasets 
                            method="repeatedcv", 
-                           # Numebr of cross validation folds
+                           # Number of cross validation folds
                           number=3, 
                           # repeat cross validation 
                           repeats=2,
@@ -143,16 +137,25 @@ confusionMatrix(p2, test.df$LandUseClass)
 # Lets predict at grid location , data contains spatial points
 # terra and sf packages used 
 # --------------------------------------------------------------------------
-# Read raster and vector data as terra ojects 
+# Read raster and vector data as terra objects 
 dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
-
 landsat_2023 <- rast(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))   # Raster objects
+
 # Number of layers, names, in raster file 
 nlyr(landsat_2023)
 names(landsat_2023)
 
+# Read polygon 
 aoi <- vect(paste0(dataFolder, 'Nairobidata.gpkg'), layer="AOI")    # vector object
 aoi
+# Convert to sf
+aoi_sf <- st_as_sf(aoi)
+
+# Plot
+ggplot(aoi_sf) +
+  geom_sf(fill = "lightgreen", color = "darkgreen") +
+  theme_classic() +
+  labs(title = "Area of Interest (AOI)")
 
 
 
