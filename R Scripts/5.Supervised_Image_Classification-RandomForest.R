@@ -76,7 +76,7 @@ names(train.df)
 # Train  a Random Forest Classiication using caret package 
 # -------------------------------------------------------------
 
-# 1. Set up parallelization to increase eiciency y quickly running loops and obtaining outputs fast 
+# 1. Set up parallelization to increase efficiency by quickly running loops and obtaining outputs fast 
 # because the data we using is large 
 mc <- makeCluster(detectCores())
 registerDoParallel(mc)
@@ -121,7 +121,7 @@ saveRDS(fit.rf, paste0(dataFolder,"RandomFores.rds"))
 # 4. Evaluate the model in the training dataset by predicting land use class on train data 
 #  using the model and computing the confusion matrix(compares actual values and predicted ones )
 # 
-p1<-predict(fit.rf,      # Model to e adopted 
+p1<-predict(fit.rf,      # Model to be adopted 
             train.df,    # data to predict 
             type = "raw")    # Return raw values rather probailities
 
@@ -147,7 +147,7 @@ confusionMatrix(p2, test.df$LandUseClass)
 dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
 
 landsat_2023 <- rast(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))   # Raster objects
-# Number of layers, names, in raster ile 
+# Number of layers, names, in raster file 
 nlyr(landsat_2023)
 names(landsat_2023)
 
@@ -156,7 +156,7 @@ aoi
 
 
 
-# Reproject to EPSG:3395 (World Mercator)
+# Reproject raster to EPSG:3395 (World Mercator)
 reprojectedLandsat <- project(landsat_2023, "EPSG:3395")
 reprojectedLandsat
 
@@ -191,7 +191,7 @@ model.rf <- readRDS(paste0(dataFolder,"RandomFores.rds"))
 p3 <- as.data.frame(predict(model.rf, grided.data))
 
 
-# Extract predicted landuse class contained in a column and append to datarame
+# Extract predicted landuse class contained in a column and append to dataframe
 grided.data$PredLandUse <- p3$predict
 str(grided.data)
 
@@ -237,7 +237,7 @@ class_labels <- c("Vegetation", "Water", "Built-up", "Grassland", "Bare Land")
 class_colors <- c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520")
 
 # Assign raster categories explicitly
-levels(rasterized1) <- data.frame(ID = 1:5, Class = class_labels)
+levels(rasterized) <- data.frame(ID = 1:5, Class = class_labels)
 
 # Create the map with a properly positioned legend
 tm_shape(rasterized) +
@@ -250,7 +250,6 @@ tm_shape(rasterized) +
 # variable importance 
 # ----------------------------------------------------------
 # Extract and plot importance
-# Extract and plot importance
 var_imp <- varImp(model.rf)
 plot(var_imp, main = "Variable Importance (Caret Random Forest)")
 
@@ -259,6 +258,8 @@ plot(var_imp, main = "Variable Importance (Caret Random Forest)")
 # ----------------------------------------------------------
 # Feature Engineering 
 # ----------------------------------------------------------
-#  Add more variales and study the effect on the model  
+#  Add more variales and study the effect on the model
+# Create ndvi, enhanced vegetation index, false colour, ndwi, savi and other then incoorperate 
+# into the model an retrain 
 
 
