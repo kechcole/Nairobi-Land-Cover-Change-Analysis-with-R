@@ -67,7 +67,7 @@ names(train.df)
 
 
 # -------------------------------------------------------------
-# Train  a Random Forest Classiication using caret package 
+# Train a Random Forest Classfier using caret package 
 # -------------------------------------------------------------
 
 # 1. Set up parallelization to increase efficiency by quickly running loops and obtaining outputs fast 
@@ -114,12 +114,17 @@ saveRDS(fit.rf, paste0(dataFolder,"RandomFores.rds"))
 
 # 4. Evaluate the model in the training dataset by predicting land use class on train data 
 #  using the model and computing the confusion matrix(compares actual values and predicted ones )
-# 
+#  p1 will be a vector containing predicted values, (not attached automatically to the dataset)
 p1<-predict(fit.rf,      # Model to be adopted 
             train.df,    # data to predict 
             type = "raw")    # Return raw values rather probailities
 
+# Computes accuracy metrics
 # Compare predicted p1 values with classes in train data 
+# Results include  1.accuracy > higher betters, 
+#                  2.Confidence level - higher better 
+#                  3.kappa 
+#                  4.p-value - 
 train.df$LandUseClass <- as.factor(train.df$LandUseClass)
 confusionMatrix(p1, train.df$LandUseClass)
 
@@ -261,8 +266,75 @@ plot(var_imp, main = "Variable Importance (Caret Random Forest)")
 # ----------------------------------------------------------
 # Feature Engineering 
 # ----------------------------------------------------------
-#  Add more variales and study the effect on the model
+# A) Add more variales and study the effect on the model
 # Create ndvi, enhanced vegetation index, false colour, ndwi, savi and other then incoorperate 
 # into the model an retrain 
+
+# I)Train data 
+new_trainData <- train.df %>% 
+      # Rename columns 
+      rename(BLUE=SR_B2, RED=SR_B3, GREEN=SR_B4, NIR=SR_B5, SWIR1=SR_B6, SWIR2=SR_B7 ) %>%
+      # Calculate spectral indicies 
+      mutate(
+            NDVI = (NIR - RED)/(NIR + RED),  # vegetation
+            NDWI = (GREEN - NIR)/(GREEN + NIR), # WATER
+            NDBI = (SWIR1 - NIR) / (SWIR1 + NIR),  # Built up areas 
+            SAVI = ((0.5 + 1) * (NIR - RED)) / (NIR + RED + 0.5)  # Soil index 
+      ) %>%
+      # Reorder columns 
+      select(x, y, BLUE, RED, GREEN, NIR, SWIR1, SWIR2, NDVI, NDWI, NDBI, SAVI, Class_ID, LandUseClass)
+
+
+# II) tEST DATA 
+new_testData <- test.df %>%
+      rename(BLUE=SR_B2, RED=SR_B3, GREEN=SR_B4, NIR=SR_B5, SWIR1=SR_B6, SWIR2=SR_B7 ) %>%
+      mutate(NDVI = (NIR - RED)/(NIR + RED),  # vegetation
+             NDWI = (GREEN - NIR)/(GREEN + NIR), # WATER
+             NDBI = (SWIR1 - NIR) / (SWIR1 + NIR),  # Built up areas 
+             SAVI = ((0.5 + 1) * (NIR - RED)) / (NIR + RED + 0.5)  # Soil 
+            ) %>%
+      select(x, y, BLUE, RED, GREEN, NIR, SWIR1, SWIR2, NDVI, NDWI, NDBI, SAVI, Class_ID, LandUseClass)
+      
+
+
+# B) Train a random forest model and predict on unseen data 
+# Define hyperparameters 
+myControl2 <- trainControl( # Split data multiple times into training datasets 
+      method="repeatedcv", 
+      # Number of cross validation folds
+     number=3, 
+     # repeat cross validation 
+     repeats=2,
+     # Retain sampling results for all training in order to know how well it performed in each
+     returnResamp='all', 
+     # disable parallel processing  
+     allowParallel=FALSE)
+
+# Register parallelisation 
+cl <- makeCluster(parallel::detectCores() - 1)
+registerDoParallel(cl)
+
+fit.rf2 <- train(  # Convert target variale into a cartegorical variale, then pass predictor variables as is  
+      as.factor(LandUseClass)~BLUE + RED + GREEN + NIR + SWIR1 + SWIR2 + NDVI + NDWI + NDBI + SAVI, 
+    data=new_trainData,     # Training dataset containing variables 
+    method = "rf",     # Random forest classifier method 
+    metric= "Accuracy",    # model evaluation method 
+    preProc = c("center", "scale"),   # Standardize and center the data 
+    trControl = myControl2      # training control setting 
+    )
+fit.rf2
+
+# Stop cluster 
+stopCluster(mc)
+
+# . Predict on unseen test data
+p4 <- predict(fit.rf2, new_testData)
+
+# Compare predicted p2 values with classes in new test data 
+new_testData$LandUseClass <- as.factor(new_testData$LandUseClass)
+
+# check metrics 
+confusionMatrix(p4,new_testData$LandUseClass)
+
 
 
