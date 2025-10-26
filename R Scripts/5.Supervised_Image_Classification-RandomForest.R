@@ -308,7 +308,7 @@ myControl2 <- trainControl( # Split data multiple times into training datasets
      # Retain sampling results for all training in order to know how well it performed in each
      returnResamp='all', 
      # disable parallel processing  
-     allowParallel=FALSE)
+     allowParallel=TRUE)
 
 # Register parallelisation 
 cl <- makeCluster(parallel::detectCores() - 1)
@@ -322,10 +322,14 @@ fit.rf2 <- train(  # Convert target variale into a cartegorical variale, then pa
     preProc = c("center", "scale"),   # Standardize and center the data 
     trControl = myControl2      # training control setting 
     )
+# check results 
 fit.rf2
 
 # Stop cluster 
-stopCluster(mc)
+stopCluster(cl)
+
+# Save model 
+saveRDS(fit.rf2, paste0(dataFolder,"RandomForest2.rds"))
 
 # . Predict on unseen test data
 p4 <- predict(fit.rf2, new_testData)
@@ -333,8 +337,18 @@ p4 <- predict(fit.rf2, new_testData)
 # Compare predicted p2 values with classes in new test data 
 new_testData$LandUseClass <- as.factor(new_testData$LandUseClass)
 
-# check metrics 
+# check metrics , 
 confusionMatrix(p4,new_testData$LandUseClass)
 
+# C) Variable importance 
+importance_df <- varImp(fit.rf2)$importance |>
+  tibble::rownames_to_column("Variable")
+
+ggplot(importance_df, aes(x = reorder(Variable, Overall), y = Overall)) +
+  geom_col(fill = "forestgreen") +
+  coord_flip() +
+  labs(title = "Variable Importance - Random Forest",
+       x = "Variables", y = "Importance Score") +
+  theme_minimal()
 
 
