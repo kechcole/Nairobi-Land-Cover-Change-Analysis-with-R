@@ -63,7 +63,9 @@ test.df<-read.csv("E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATO
 train.df <- train.df %>% sample_frac(.1)
 test.df <- test.df %>% sample_frac(.1)
 
+# view data properties , solumns and 
 names(train.df)
+str(train.df)
 
 
 # -------------------------------------------------------------
@@ -249,9 +251,9 @@ levels(rasterized) <- data.frame(ID = 1:5, Class = class_labels)
 
 # Create the map with a properly positioned legend
 tm_shape(rasterized) +
-  tm_raster(palette = class_colors, title = "Class Value", style = "cat") +  
-  tm_layout(legend.outside = TRUE, legend.outside.position = "right") +
-  tm_add_legend(type = "fill", labels = class_labels, col = class_colors)
+  tm_raster(palette = class_colors, title = "Land Cover", style = "cat") +
+  tm_layout(legend.outside = TRUE, legend.outside.position = "right")
+
 
 
 # --------------------------------------------------
@@ -340,6 +342,7 @@ new_testData$LandUseClass <- as.factor(new_testData$LandUseClass)
 # check metrics , 
 confusionMatrix(p4,new_testData$LandUseClass)
 
+
 # C) Variable importance 
 importance_df <- varImp(fit.rf2)$importance |>
   tibble::rownames_to_column("Variable")
@@ -350,5 +353,93 @@ ggplot(importance_df, aes(x = reorder(Variable, Overall), y = Overall)) +
   labs(title = "Variable Importance - Random Forest",
        x = "Variables", y = "Importance Score") +
   theme_minimal()
+
+
+# D) Predict at grid location and convert to raster 
+# Grided data is organised into cells(pixels) covering a geographical area defined by x and y coordinates 
+# and put in dataframe format. 
+# Each cell represents an area on the ground (30m x 30m) and store other spectral variables 
+# such as ndvi, red, green, blue, swir bands. 
+# Data is extracted from landsat image in which we will predict their classes 
+
+# i) Prepare grided 
+new_gridData <- grided.data %>% 
+      # Rename columns because the columns must be similar to the one used in training data 
+      rename(BLUE=SR_B2, RED=SR_B3, GREEN=SR_B4, NIR=SR_B5, SWIR1=SR_B6, SWIR2=SR_B7 ) %>%
+      # Calculate spectral indicies 
+      mutate(
+            NDVI = (NIR - RED)/(NIR + RED),  # vegetation
+            NDWI = (GREEN - NIR)/(GREEN + NIR), # WATER
+            NDBI = (SWIR1 - NIR) / (SWIR1 + NIR),  # Built up areas 
+            SAVI = ((0.5 + 1) * (NIR - RED)) / (NIR + RED + 0.5)  # Soil index 
+      ) %>%
+      # Reorder columns 
+      select(x, y, BLUE, RED, GREEN, NIR, SWIR1, SWIR2, NDVI, NDWI, NDBI, SAVI)
+
+head(new_gridData, 10)
+
+
+# ii) Load the model and view properties inclusing accuracy , samples used, variables , tuning parameters 
+randFstModel <- readRDS(paste0(dataFolder,"RandomForest2.rds"))
+print(randFstModel)
+
+
+# iii) Predict at grid locations, predict the class for each cell  
+# the prediction is a dataframe with 1 column containing predicted class 
+p4 <- as.data.frame(predict(randFstModel, newdata = new_gridData))
+
+# Extract predicted landuse class contained in a prediction4 and append to dataframe
+new_gridData$PredLandUse <- p4$predict
+str(new_gridData)
+
+# Get class id , a new column containing class ID of the predicted values 
+new_gridData <- new_gridData %>% 
+                     mutate(Class_ID = case_when(
+                              PredLandUse == "water" ~ 2,
+                              PredLandUse == "vegetation" ~ 4,
+                              PredLandUse == "builtup" ~ 3,
+                              PredLandUse == "bare" ~ 5,
+                              TRUE ~ 1      # forest
+                           ))
+names(new_gridData)
+
+
+# iv) Define raster extent and resolution similar to landsat image then 
+# rasterize the sf object
+# Convert df to sf object , coordinates x & y will be put to geometry column 
+sf_data <- st_as_sf(new_gridData, coords = c("x", "y"), crs = 3395)
+names(sf_data)
+
+r <- rast(ext(sf_data), resolution = 30, crs = "EPSG:3395")
+rasterized <- rasterize(sf_data, r, field = "Class_ID")
+
+
+# v) Plot with tmap
+# Define class labels and matching colors
+class_labels <- c("Vegetation", "Water", "Built-up", "Grassland", "Bare Land")
+class_colors <- c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520")
+
+# Assign raster categories explicitly
+levels(rasterized) <- data.frame(ID = 1:5, Class = class_labels)
+
+# Create the map with a properly positioned legend
+tm_shape(rasterized) +
+  tm_raster(palette = class_colors, title = "Land Cover", style = "cat") +
+  tm_layout(legend.outside = TRUE, legend.outside.position = "right")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
