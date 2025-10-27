@@ -267,7 +267,7 @@ plot(var_imp, main = "Variable Importance (Caret Random Forest)")
 
 
 
-# CLAEAN THE ENTIRE ENVIROMENT 
+# CLEAN THE ENTIRE ENVIROMENT 
 rm(list = ls())
 
 

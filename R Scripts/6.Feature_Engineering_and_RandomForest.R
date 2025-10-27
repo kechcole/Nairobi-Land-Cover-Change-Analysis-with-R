@@ -137,6 +137,16 @@ top_vars <- imp_df$Variable[1:9]
 cat("Selected important variables:\n")
 print(top_vars)
 
+# ------------------------------------------------------------------------
+# Retrain model using variable selected above 
+# -------------------------------------------------------------------------
+
+
+
+
+
+
+
 
 
 
@@ -218,5 +228,5 @@ tm_shape(rasterized) +
 
 
 
-# CLAEAN THE ENTIRE ENVIROMENT 
+# CLEAN THE ENTIRE ENVIROMENT 
 rm(list = ls())
