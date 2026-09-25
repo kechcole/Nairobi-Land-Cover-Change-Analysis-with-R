@@ -41,8 +41,12 @@ library(RStoolbox)   # Image analysis
 library(ggplot2)     # plotting
 library(gridExtra)   # plot arrangement
 
+
+source("config/config_local.R")
  
- 
+landsat_24 <- stack(
+      file.path(DATA_ROOT, "Nairobi Landsat data", "NAIROBI_L8_2023.tif")
+  )
  
 # Load raster data and study properties 
 # ---------------------------------------------------- 
