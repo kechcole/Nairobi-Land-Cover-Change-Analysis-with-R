@@ -76,6 +76,7 @@ grided.data <- grided.data %>%
 mc <- makeCluster(detectCores())
 registerDoParallel(mc)
 
+
 # Tuning parameters 
 myControl <- trainControl(method="repeatedcv", 
                           number=3, 

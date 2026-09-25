@@ -210,4 +210,4 @@ pansharpened
  
  
 #  REERENCES
-#  1. Landsat isualisation - https://zia207.github.io/geospatial-r-github.io/landsat-8-image-processing.html
+#  1. Landsat visualisation - https://zia207.github.io/geospatial-r-github.io/landsat-8-image-processing.html
