@@ -46,21 +46,29 @@ There are several indicies but more traditional ones include
 '''
 
 # ---------------------------------------------------------------------
-# Load libraries and data 
+# Install and load libraries and data 
 # ---------------------------------------------------------------------
+# install ggplot dependancy and reinstall it 
+install.packages("cli")
+install.packages("ggplot2")
 
-library(raster)      # raster data
-library(rasterVis)  # raster visualisation  
-library(sp)         # Spatial data processing           
-# library(rgdal)      # Spatial data processing
-library(RStoolbox)  # Image analysis
+# check version 
+packageVersion("cli")
+packageVersion("ggplot2")
+
+# load libraries 
+library(terra)       # raster data   
 library(ggplot2)    # ploting
 
 
 # Load data. Landsat data used for an area covering the greater Nairobi region downloaded from Google Earth Engine.
-dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
+source("config/config_local.R")
+ 
+landsat_2023 <- rast(file.path(DATA_ROOT, "NAIROBI_L8_2023.tif"))
 
-landsat_2023 <- stack(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))
+
+
+# select individual bands
 blue <- landsat_2023[[2]]
 red <- landsat_2023[[4]]
 green <- landsat_2023[[3]]
@@ -74,36 +82,44 @@ swir1 <- landsat_2023[[6]]
 #-------------------------------------------------------------------------------
 ndvi = (nir - red) / (nir + red)
 
-# Plot data using ggplot 
-ndvi_img <- ggR(ndvi,  geom_raster = TRUE)+
-                # Legend title and colours 
-                scale_fill_gradientn("NDVI", 
-                        colours = c("red", "yellow", "green", "green4"))+
-                # Remove axis labels 
-                theme(axis.title.x=element_blank(),
-                      axis.text.x=element_blank(),
-                      axis.ticks.x=element_blank(),
-                      axis.title.y=element_blank(),
-                      axis.text.y=element_blank(),
-                      axis.ticks.y=element_blank())+
-                ggtitle("Normalised Difference Vegetation Index.") # Plot title 
-ndvi_img
+# Plot data using terra's plot function 
+plot(ndvi,    # spatial Raster object 
+
+        # colour pellets for ploting vegetation : red - low vegetation, yellow - intermediate veg, 
+        # green - dense and heavy vegetation , 100 is for more colors generating a smoother map
+     col = colorRampPalette(c("red", "yellow", "green", "green4"))(100),
+     main = "Normalised Difference Vegetation Index.",
+     axes = FALSE,
+     plg = list(title = "NDVI", cex = 0.8))
+
+
+#--------------------------------------------------------------------------
+# band distribution for NDVI 
+#--------------------------------------------------------------------------
+
+# Convert raster to data frame
+ndvi_df <- as.data.frame(ndvi, xy = FALSE, na.rm = TRUE)
+names(ndvi_df)
+
+ggplot(ndvi_df, aes(x = SR_B5)) +
+  geom_histogram(bins = 60, fill = "green4", color = "white") +
+  labs(title = "NDVI Distribution", x = "NDVI", y = "Frequency") +
+  theme_minimal()
+
 
 
 
 #-------------------------------------------------------------------------------
 #   Two bands Enhanced Vegetation Index.
 #-------------------------------------------------------------------------------
-G = 2.5
+G = 2.5    # Gain values 
 evi2 = G * (nir - red) / (nir + 2.4 * red + 1)
 
-evi2_img <- ggR(evi2,  geom_raster = TRUE)+
-        # Legend title and colours 
-        scale_fill_gradientn("EVI2", 
-                colours = c("red", "yellow", "green", "blue"))+
-        ggtitle("2-Bands Enhanced Vegetation Index(EVI2).") # Plot title
-
-evi2_img
+plot(evi2,
+     col = colorRampPalette(c("red", "yellow", "green", "blue"))(100),
+     main = "2-Bands Enhanced Vegetation Index(EVI2).",
+     axes = FALSE,
+     plg = list(title = "EVI2", cex = 0.8))
 
 
 
@@ -112,12 +128,11 @@ evi2_img
 #--------------------------------------------------------------------
 ndwi = (nir - swir1) / (nir + swir1)
 
-ndwi_img <- ggR(ndwi,  geom_raster = TRUE)+
-          # Legend title and colours 
-          scale_fill_gradientn("Ndwi", 
-                  colours = c("blue", "green", "yellow", "red"))+
-          ggtitle("Normalised Difference Water Index.") # Plot title 
-ndwi_img
+plot(ndwi,
+     col = colorRampPalette(c("blue", "green", "yellow", "red"))(100),
+     main = "Normalised Difference Water Index.",
+     axes = FALSE,
+     plg = list(title = "Ndwi", cex = 0.8))
 
 
 #--------------------------------------------------------------------------
@@ -126,12 +141,11 @@ ndwi_img
 L = 0.5
 savi = (L + 1)*(nir - red) / (nir + red + L)
 
-savi_img <- ggR(savi,  geom_raster = TRUE)+
-            # Legend title and colours 
-            scale_fill_gradientn("SAVI", 
-                    colours = c("red", "yellow", "green", "green4"))+
-            ggtitle("Soil Adjusted Vegetation Index.") # Plot title 
-savi_img
+plot(savi,
+     col = colorRampPalette(c("red", "yellow", "green", "green4"))(100),
+     main = "Soil Adjusted Vegetation Index.",
+     axes = FALSE,
+     plg = list(title = "SAVI", cex = 0.8))
 
 
 
@@ -142,13 +156,11 @@ savi_img
 ibi <- ( (2*swir1 / (swir1 + nir)) - (nir/(nir + red) + green/(green + red)) ) /
        ( (2*swir1 / (swir1 + nir)) + (nir/(nir + red) + green/(green + red)) )
 
-ibi_img <- ggR(ibi,  geom_raster = TRUE)+
-          # Legend title and colours 
-          scale_fill_gradientn("EVI2", 
-                  colours = c("red", "yellow", "green", "blue"))+
-          ggtitle("2-Band Enhanced Vegetation Index(EVI1).") # Plot title 
-
-ibi_img
+plot(ibi,
+     col = colorRampPalette(c("red", "yellow", "green", "blue"))(100),
+     main = "2-Band Enhanced Vegetation Index(EVI1).",
+     axes = FALSE,
+     plg = list(title = "EVI2", cex = 0.8))
 
 
 
@@ -157,14 +169,48 @@ ibi_img
 # -------------------------------------------------------------------------------
 ndbi = (swir1 - nir) / (swir1 + nir)
 
-ndbi_img <- ggR(ndbi,  geom_raster = TRUE)+
-          # Legend title and colours 
-          scale_fill_gradientn("NDBI", 
-                  colours = c("red", "yellow", "blue", "blue4"))+
-          ggtitle("Normalised Difference Built-up Index.") # Plot title 
+plot(ndbi,
+     col = colorRampPalette(c("red", "yellow", "blue", "blue4"))(100),
+     main = "Normalised Difference Built-up Index.",
+     axes = FALSE,
+     plg = list(title = "NDBI", cex = 0.8))
 
-ndbi_img
 
+
+#--------------------------------------------------------------------------
+# PLOT THE SPECTRAL PROFILE OF POINT ON THE IMAGE
+#--------------------------------------------------------------------------
+# Extract band values at a single pixel (row, col)
+vals <- extract(landsat_2023, cellFromRowCol(landsat_2023, 500, 500))
+vals <- as.numeric(vals[1, -1])   # drop ID column
+vals
+
+wavelengths <- c(443, 482, 561, 655, 865, 1609)  # Landsat 8/9 example
+bands <- c("Blue", "Green", "Red", "NIR", "SWIR1", "SWIR2")
+
+length(bands)         # should equal number of bands
+length(wavelengths)   # must match bands
+length(vals)          # must match bands
+str(vals)             # check if it's a data.frame with extra columns
+
+
+df <- data.frame(Band = factor(bands, levels = bands),
+                 Wavelength = wavelengths,
+                 Reflectance = vals)
+
+ggplot(df, aes(x = Wavelength, y = Reflectance)) +
+  geom_line(color = "green4", linewidth = 1) +
+  geom_point(color = "green4", size = 2) +
+  labs(title = "Spectral Profile of a Single Pixel",
+       x = "Wavelength (nm)", y = "Reflectance") +
+  theme_minimal()
+
+
+
+
+
+# Matters to handle 
+# 1. Band value distribution plot, outliers how to elliminate, spectral profile
 
 # REFRENCES.
 # 1. Tutorial link - https://zia207.github.io/geospatial-r-github.io/spectral-indices.html
