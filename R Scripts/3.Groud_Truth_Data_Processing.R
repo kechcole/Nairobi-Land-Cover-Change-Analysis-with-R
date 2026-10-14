@@ -46,7 +46,7 @@ res(landsat_2023)       # Resolution
 nlyr(landsat_2023)      # Number of layers 
 names(landsat_2023)     # Bands 
 
-R Scripts\3.Groud_Truth_Data_Processing.R
+
 # -------------------------------------------------------------------------------------------------------------
 # 2. Load vector data and reproject to same CRS as raster
 # -------------------------------------------------------------------------------------------------------------
