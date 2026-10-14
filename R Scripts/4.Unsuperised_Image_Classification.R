@@ -38,31 +38,46 @@ This algorithm does not have any prior knowledge of the data and uses pixel prop
 to design clusters that minimises feature variation and maximises class separation. One huge advantage over supervised classification is 
 that the algorith is able to reveal hidden patterns that human capacity easily ignores. Conversly, is fall short of meeting user 
 as in may require expert knowledge to interpret. 
-
-
+Unsupervised classification groups pixels based solely on their spectral similarity, without any prior training labels. 
+It answers the question: "What natural groupings exist in this imagery?" rather than "Which class does this 
+pixel belong to?".
+The most common algorithm is K-means, which iteratively assigns pixels to the nearest cluster center and 
+recalculates centers until stable.
 '''
 # ---------------------------------------------------------------------------------
-#                    Section 1 : UNSUPERVISED CLASSIFICATION.
+#                    Section 1 : UNSUPERVISED CLASSIFICATION USING K-MEANS.
 #----------------------------------------------------------------------------------
+install.packages("factoextra")
 
 # Load Libraries 
-library(raster)      # raster data
-library(rasterVis)  # raster visualisation  
-library(sp)         # Spatial data processing           
-# library(rgdal)      # Spatial data processing
-library(RStoolbox)  # Image analysis
-library(ggplot2)    # ploting
+library(terra)
+library(RStoolbox)
+library(sp)
+
+
+
+
+# ---------------------------------------------------------
+# Setup enviroment 
+source("config/config_local.R")
+project_root <- system("git rev-parse --show-toplevel", intern = TRUE)
+DATA_ROOT    <- file.path(project_root, "Nairobi Landsat data")
+
 
 
 # Load multiband raster data 
-dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
-landsat_2023 <- stack(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))
+landsat_2023 <- rast(file.path(DATA_ROOT, "NAIROBI_LANDSAT_MERCATOR/Landsat_8_2023_Proj.tif"))
 
-# Confirm multiband 
-landsat_2023
+# Select neccesary bands 
+bands <- landsat_2023[[2:7]]
+
+
 
 # K-means Clustering using 8 classes. 
-
+landsat_2023 <- rast(file.path(DATA_ROOT,
+                               "NAIROBI_LANDSAT_MERCATOR",
+                               "Landsat_8_2023_Proj.tif"))
+landsat_2023 <- landsat_2023[[2:7]]
 # Set seed for easy duplication
 set.seed(4)
 
@@ -75,7 +90,7 @@ unsupClass_08 <- unsuperClass(landsat_2023,      # raster image
 # Plot map 
 colours <- colorRampPalette(c("white", "dark grey", "darkgreen","green", "light blue", "yellow", "red", "blue", "orange"))
 spplot(unsupClass_08$map,    # Object 
-      main="Unsupervised K-Classificantion with 8 Classes" ,   # Tilte  
+      main="Unsupervised K-Classification with 8 Classes" ,   # Tilte  
       # Legend apperance and behaviour 
       colorkey = list(space="right",    # Position 
                       tick.number=1,height=1, width=1,  # Size 
@@ -85,18 +100,15 @@ spplot(unsupClass_08$map,    # Object
       cut=7)  # 7 intervals has 8 classes 
 
 # Save the image on disk 
-writeRaster(unsupClass_08$map, filename=paste0(dataFolder, 'Unsup_Kmeans.tif'), format="GTiff", overwrite=TRUE)
+writeRaster(unsupClass_08$map, file.path(DATA_ROOT, 'Unsup_Kmeans.tif'), overwrite = TRUE)
 
-print(paste0(dataFolder, 'Unsup_Kmeans.tif'))
-
-
-
+# verify file exist 
+file.exists(file.path(DATA_ROOT, 'Unsup_Kmeans.tif'))
 
 
 
 
-
-# CLAEAN THE ENTIRE ENVIROMENT 
+# CLEAN THE ENTIRE ENVIROMENT 
 rm(list = ls())
 
 
