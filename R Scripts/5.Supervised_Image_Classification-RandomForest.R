@@ -29,9 +29,12 @@ takes the day. Each tree
 
 
 '''
+# -------------------------------------------------------------
+# Train a Random Forest Classfier using caret package 
+# -------------------------------------------------------------
 
 # Install new packages
-packages <- c("randomForest", "plyr", "RStoolbox", "RColorBrewer", "doParallel", "tmap")
+packages <- c("randomForest", "plyr", "RStoolbox", "RColorBrewer", "doParallel", "tmap", "ranger")
 
 ipak <- function(pkg){
    new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
@@ -44,22 +47,24 @@ ipak <- function(pkg){
 ipak((packages))
 
 library(caret)        # machine laerning
-library(raster)       # raster processing
-library(dplyr)        # data manipulation 
-library(ggplot2)      # ploting
 library(doParallel)   # Parallel processing
-
-library(sf)
+library(dplyr)        # data manipulation 
+library(ranger)     # faster rf backend
 library(terra)
-library(tmap)
+library(ggplot2)      # ploting
 
 
 
-# Load data 
-train.df<-read.csv("E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/trainingData.csv", header = T)
-test.df<-read.csv("E:/DISK E PETER/flux files/New folder/NAIROBI_LANDSAT_MERCATOR/testData.csv", header = T)
 
-# Randomly select 10% of each data making it lighter for the machine 
+source("config/config_local.R")
+
+# Load data train and test data 
+train.df <- read.csv(file.path(DATA_ROOT, "NAIROBI_LANDSAT_MERCATOR/trainingData.csv"))
+test.df <- read.csv(file.path(DATA_ROOT, "NAIROBI_LANDSAT_MERCATOR/testData.csv"))
+
+
+
+# Randomly select 10% of data making it lighter for the machine 
 train.df <- train.df %>% sample_frac(.1)
 test.df <- test.df %>% sample_frac(.1)
 
@@ -68,202 +73,208 @@ names(train.df)
 str(train.df)
 
 
-# -------------------------------------------------------------
-# Train a Random Forest Classfier using caret package 
-# -------------------------------------------------------------
 
-# 1. Set up parallelization to increase efficiency by quickly running loops and obtaining outputs fast 
-# because the data we using is large 
-mc <- makeCluster(detectCores())
-registerDoParallel(mc)
-
-# 2. Set seed the model can be reproduced later 
-set.seed(120)
-
-# Define hyperparameters or the Random forest function 
-# These settings will guide how the model is trained and validated , it includes the resampling method 
-# number of folds for validation, numer of times the cross validation is repeated, whether parralelization 
-# is allowed
-myControl <- trainControl( # Split data multiple times into training datasets 
-                           method="repeatedcv", 
-                           # Number of cross validation folds
-                          number=3, 
-                          # repeat cross validation 
-                          repeats=2,
-                          # Retain sampling results for all training in order to know how well it performed in each
-                          returnResamp='all', 
-                          # Enable parallel processing to speed up training and improve results 
-                          allowParallel=TRUE)
-
-# 3. Train model 
-fit.rf <- train(  # Convert target variale into a cartegorical variale, predictor variables are B2-B7 
-                  as.factor(LandUseClass)~SR_B2 + SR_B3 + SR_B4+ SR_B4 + SR_B6 + SR_B7, 
-                data=train.df,     # Training dataset containing variables 
-                method = "rf",     # Random forest classifier method 
-                metric= "Accuracy",    # model evaluation method 
-                preProc = c("center", "scale"),   # Standardize and center the data 
-                trControl = myControl      # training control setting 
-                )
-fit.rf
-
-# Stop cluster 
-stopCluster(mc)
-
-# Save model 
-saveRDS(fit.rf, paste0(dataFolder,"RandomFores.rds"))
-
-
-
-# 4. Evaluate the model in the training dataset by predicting land use class on train data 
-#  using the model and computing the confusion matrix(compares actual values and predicted ones )
-#  p1 will be a vector containing predicted values, (not attached automatically to the dataset)
-p1<-predict(fit.rf,      # Model to be adopted 
-            train.df,    # data to predict 
-            type = "raw")    # Return raw values rather probailities
-
-# Computes accuracy metrics
-# Compare predicted p1 values with classes in train data 
-# Results include  1.accuracy > higher betters, 
-#                  2.Confidence level - higher better 
-#                  3.kappa 
-#                  4.p-value - 
+# ---- 1. Prep the data ONCE (not inside the formula) -------------------------
+# Convert target to factor outside the formula — avoids re-evaluating
+# the conversion on every CV fold.
 train.df$LandUseClass <- as.factor(train.df$LandUseClass)
-confusionMatrix(p1, train.df$LandUseClass)
+
+# Sanity check class balance (helps explain why Accuracy may be misleading)
+print(table(train.df$LandUseClass))
+
+# Optional but recommended: drop rows with NA in the predictors
+train.df <- train.df[complete.cases(train.df[, c("SR_B2","SR_B3","SR_B4","SR_B5","SR_B6","SR_B7","LandUseClass")]), ]
 
 
-# 5. Predict on unseen test data
-p2 <- predict(fit.rf, test.df)
+# ---- 2. Training control ----------------------------------------------------
+# - repeats = 1 while iterating (bump to 3–5 for the final model)
+# - returnResamp = "final" is enough; "all" just stores extra per-fold stats
+# - allowParallel only matters if a backend is registered (see bottom)
+myControl <- trainControl(
+  method        = "repeatedcv",
+  number        = 3,
+  repeats       = 1,
+  returnResamp  = "final",
+  allowParallel = TRUE,
+  savePredictions = "final",
+  classProbs      = TRUE     # handy for confusion matrix / ROC later
+)
 
-# Compare predicted p1 values with classes in test data 
-test.df$LandUseClass <- as.factor(test.df$LandUseClass)
-confusionMatrix(p2, test.df$LandUseClass)
+# ---- 3. Small, explicit tuning grid -----------------------------------------
+# mtry = number of predictors sampled at each split.
+# With 5 predictors (SR_B2, B3, B4, B5, B6, B7), sensible values are 2–3.
+tuneGrid <- expand.grid(mtry = c(2, 3))
 
-
-
-# -------------------------------------------------------------------------------
-# Lets predict at grid location , data contains spatial points
-# terra and sf packages used 
-# --------------------------------------------------------------------------
-# Read raster and vector data as terra objects 
-dataFolder <- "E:/DISK E PETER/flux files/New folder/Nairobi Landsat data/"
-landsat_2023 <- rast(paste0(dataFolder, 'NAIROBI_L8_2023.tif'))   # Raster objects
-
-# Number of layers, names, in raster file 
-nlyr(landsat_2023)
-names(landsat_2023)
-
-# Read polygon 
-aoi <- vect(paste0(dataFolder, 'Nairobidata.gpkg'), layer="AOI")    # vector object
-aoi
-# Convert to sf
-aoi_sf <- st_as_sf(aoi)
-
-# Plot
-ggplot(aoi_sf) +
-  geom_sf(fill = "lightgreen", color = "darkgreen") +
-  theme_classic() +
-  labs(title = "Area of Interest (AOI)")
-
-
-
-# Reproject raster to EPSG:3395 (World Mercator)
-reprojectedLandsat <- project(landsat_2023, "EPSG:3395")
-reprojectedLandsat
-
-aoi <- project(aoi,  "EPSG:3395")
-aoi
-crs(aoi)
+# ---- 4. Train the model -----------------------------------------------------
+# Notes:
+#   * method = "ranger"  -> much faster than "rf", same algorithm family
+#   * preProc removed    -> random forests do NOT need center/scale
+#   * ntree = 300        -> lighter than the default 500; tune up if needed
+#   * importance = "impurity" -> lets you inspect variable importance
+fit.rf <- train(
+  LandUseClass ~ SR_B2 + SR_B3 + SR_B4 + SR_B5 + SR_B6 + SR_B7,
+  data       = train.df,
+  method     = "ranger",
+  metric     = "Accuracy",
+  trControl  = myControl,
+#   tuneGrid   = tuneGrid,
+  num.trees  = 300,
+  importance = "impurity",
+  verbose    = FALSE
+)
 
 
-# Select bands used in predicting model, band 2-7. 
-landsat <- subset(reprojectedLandsat, c("SR_B2", "SR_B3","SR_B4", "SR_B5", "SR_B6", "SR_B7"))
-landsat
-
-# Mask the landsat image on the Area of Interest(clipping)
-landsat_clipped <- crop(landsat, aoi)  # Crop to bounding box
-landsat_clipped <- mask(landsat, aoi)  # Mask to exact shape
-landsat_clipped <- terra::trim(landsat_clipped) # Remove missing values for original areas not within the aoi
+# ---- 5. Inspect results -----------------------------------------------------
+print(fit.rf)
+print(fit.rf$bestTune)
+print(fit.rf$results)
 
 
-# Plot as RGB image
-terra::plotRGB(landsat_clipped, r=3, g=2, b=1, stretch="lin", smooth=FALSE, axes=TRUE)  # Linear stretch
+# Confusion matrix on the held-out CV predictions
+confusionMatrix(fit.rf)
 
 
-# Convert raster to a data frame with coordinates, each cell value in all bands 
-# are captured, export for later use 
-grided.data <- as.data.frame(landsat_clipped, xy=TRUE)
-# Write to CSV
-write.csv(grided.data, file.path(dataFolder, "grided_data.csv"), row.names = FALSE)
-str(grided.data)
+# Variable importance
+varImp(fit.rf)
+plot(varImp(fit.rf))
 
 
 
-# Load random forest model and fit at grid location 
-model.rf <- readRDS(paste0(dataFolder,"RandomFores.rds"))
-p3 <- as.data.frame(predict(model.rf, grided.data))
+
+# ------------------------------------------------------------------------------------------------
+# 6. Evaluate the model in the training dataset by predicting land use class on train data 
+# ------------------------------------------------------------------------------------------------
+#  using the model and computing the confusion matrix(compares actual values and predicted ones
+
+# 6.1 Sanity check to ensure test data matches training data 
+# Same factor levels for the target, same predictor columns
+test.df$LandUseClass <- factor(test.df$LandUseClass,
+                               levels = levels(train.df$LandUseClass))
+test.df$LandUseClass
+
+# Confirm predictor names match exactly what the model expects
+stopifnot(all(c("SR_B2","SR_B3","SR_B4","SR_B5","SR_B6","SR_B7") %in% names(test.df)))
+
+# Drop rows with NA in predictors (ranger can't predict them)
+test.df <- test.df[complete.cases(
+  test.df[, c("SR_B2","SR_B3","SR_B4","SR_B5","SR_B6","SR_B7","LandUseClass")]
+), ]
 
 
-# Extract predicted landuse class contained in a column and append to dataframe
-grided.data$PredLandUse <- p3$predict
-str(grided.data)
+# 6.2 Fit the model on the new dataset 
+pred_class <- predict(fit.rf, newdata = test.df)          # class labels
+pred_prob  <- predict(fit.rf, newdata = test.df, type = "prob")  # class probs
 
 
-# Get class id , a new column containing class ID of the predicted values 
-grid.data <- grided.data %>% 
-                     mutate(Class_ID = case_when(
-                              PredLandUse == "water" ~ 2,
-                              PredLandUse == "vegetation" ~ 4,
-                              PredLandUse == "builtup" ~ 3,
-                              PredLandUse == "bare" ~ 5,
-                              TRUE ~ 1      # forest
-                           ))
-
-names(grid.data)
+# 6.3 Confusion matrix + metrics 
+cm <- confusionMatrix(pred_class, test.df$LandUseClass)
+print(cm)
 
 
-# --------------------------------------
-# RASTERIZATIoN with terra & sf
-# -------------------------------------
-# Convert to sf object , coordinates x & y will be put to geometry column 
-sf_data <- st_as_sf(grid.data, coords = c("x", "y"), crs = 3395)
-names(sf_data)
+# Per-class accuracy (a.k.a. "user's accuracy" / precision per class)
+print(cm$byClass)
 
-# Define raster extent and resolution similar to landsat image 
-r <- rast(ext(sf_data), resolution = 30, crs = "EPSG:3395")
-
-rasterized <- rasterize(sf_data, r, field = "Class_ID")
-
-
-# ---------------------------------------------------------------
-# Plot 
-# ------------------------------------------------------------------
-# base plot
-plot(rasterized, main = "Rasterized Data", legend = FALSE, 
-      col = c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520"))
-    
-
-
-# Plot with tmap
-# Define class labels and matching colors
-class_labels <- c("Vegetation", "Water", "Built-up", "Grassland", "Bare Land")
-class_colors <- c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520")
-
-# Assign raster categories explicitly
-levels(rasterized) <- data.frame(ID = 1:5, Class = class_labels)
-
-# Create the map with a properly positioned legend
-tm_shape(rasterized) +
-  tm_raster(palette = class_colors, title = "Land Cover", style = "cat") +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "right")
+# Overall numbers pulled out
+cat("Overall accuracy :", round(cm$overall["Accuracy"], 4), "\n")
+cat("Kappa            :", round(cm$overall["Kappa"], 4), "\n")
+cat("95% CI (accuracy):", round(cm$overall["AccuracyLower"], 4),
+    "-", round(cm$overall["AccuracyUpper"], 4), "\n")
 
 
 
-# --------------------------------------------------
-# variable importance 
-# ----------------------------------------------------------
-# Extract and plot importance
-var_imp <- varImp(model.rf)
-plot(var_imp, main = "Variable Importance (Caret Random Forest)")
+# 6.4. Compare CV accuracy vs. test accuracy 
+
+
+# Large drop here = overfitting or (more likely for Landsat data) spatial
+# autocorrelation inflating the CV estimate.
+cat("CV accuracy (train)  :", round(max(fit.rf$results$Accuracy), 4), "\n")
+cat("Test accuracy        :", round(cm$overall["Accuracy"], 4), "\n")
+
+
+
+# 6.5 Important metrics 
+# Overall accuracy is the headline number, but reviewers and stakeholders usually want these too:
+# if one land-cover class dominates (e.g., 80% "vegetation"), a model can hit 
+# 80% overall accuracy by predicting that one class for everything. 
+# Macro F1 and per-class recall expose that.
+
+# Per-class precision, recall, F1 (caret gives these in cm$byClass)
+by_class <- as.data.frame(cm$byClass)
+by_class$Class <- rownames(by_class)
+print(by_class[, c("Class", "Precision", "Recall", "F1",
+                   "Balanced Accuracy")])
+
+# Macro-averaged F1 (treats each class equally, regardless of size)
+cat("Macro F1:", round(mean(by_class$F1, na.rm = TRUE), 4), "\n")
+
+
+# 6.6 Visualise confusion matrix 
+library(reshape2)
+
+cm_df <- as.data.frame(cm$table)
+cm_df <- melt(cm$table)
+cm_df$prop <- cm_df$value / ave(cm_df$value, cm_df$Prediction, FUN = sum)
+
+ggplot(cm_df, aes(x = Reference, y = Prediction, fill = prop)) +
+  geom_tile() +
+  geom_text(aes(label = value), color = "white", size = 3) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Confusion matrix (test set)", x = "Actual", y = "Predicted") +
+  theme_minimal()
+
+
+
+
+
+
+# ------------------------------------------------------------------------------------------------
+# 7. Predict on another image of a different year , 2018, but similar landsat series 
+# --------------------------------------------------------------------------------------
+# Have similar acqusition geometry, scalling and collected at almost the same time of the year(same processing pipeline). 
+# Though different years could have different phenology, sun angles and collection residuals. 
+
+# Read raster data 
+landsat_2018 <- rast(file.path(DATA_ROOT, "NAIROBI_LANDSAT_MERCATOR/Landsat_8_2018_Proj.tif"))
+landsat_2018
+
+# Check whether band names match and crs , must be similar with training datset 
+names(landsat_2018)
+crs(landsat_2018)
+
+# Select bands 
+new_img <- landsat_2018[[c("SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7")]]
+new_img
+
+
+# Predict 
+# Key point: terra::predict() streams the raster in chunks — it does not load the whole image into RAM. 
+# This is exactly what you want given the 98% memory situation earlier
+pred_raster <- predict(new_img, fit.rf, na.rm = TRUE, type = "raw")
+
+
+# Plot predicted raster of 2018 landsa image 
+# Create colour codes 
+lvls <- levels(train.df$LandUseClass)
+print(lvls)
+
+
+# display names, in the SAME order as lvls
+class_labels <- c("bare", "builtup", "forest", "vegetation", "water")  # <-- match lvls order
+class_colors <- c("#DAA520",   "#8B0000",  "#056d05", "#82eb82",  "#1E90FF") # <-- match lvls order
+
+
+# Assign a colour table to the categorical raster
+coltab(pred_raster) <- data.frame(
+  value = 1:length(class_colors),
+  col   = class_colors
+)
+
+plot(pred_raster,
+     main = "Predicted Land Use 2018",
+     col  = class_colors,      # used when coltab isn't set
+     type = "classes",
+     mar  = c(3, 3, 2, 8))     # extra right margin for the legend
+
 
 
 
