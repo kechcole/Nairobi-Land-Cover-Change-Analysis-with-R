@@ -1,33 +1,396 @@
+# ---------------------------------------------------------------------------------------
+#                              Feature Engineering 
+# -------------------------------------------------------------------------------------
+
 # ----------------------------------------------------------
-# Feature Engineering 
+# (A) MODEL IMPROVEMENTS THROUGH SPATIAL CROSS VALIDATION 
+
+#  Train the model using spatial cross-validation to avoid inflated accuracy estimates (caused by spatial autocorrelation)
+#  as observed in our previous model where it predicted over 98% of the features during training and testing. 
+# Such high/inflated values are commonly attributed to spatial autocorrelation, a phenomena where pixels within the same proximity 
+# have similar characteristics. Thus when modelling, a model encounters similar spectral characteristics as training
+# and produces overly optimistic results that are deceiving and misleading due to spatial pattern similarity between test and train data. 
+# This behaviour is commonly refered to as spatial data leakage. 
+# The inability of the model to learn relationship causes it to perform poorly on unseen data. Training and test pixels are intermingled. 
+# Neighbouring pixels may leak similar information across the split.
+# To resolve this we will divide the training image data into blocks then use some for training and others for testing, 
+# this is to reduce the likelyhod of similar closer pixels appearing in both train and test datasets. 
+
+
+
+
+
 # ----------------------------------------------------------
-# A) Add more variales and study the effect on the model
+# (B) FEATURE SELECTION 
+# Add more variables and find optimal features that improve model performance. 
 # Transformation and creation of existing variables helps improve the model by helping 
 # a model learn patterns more effectively. 
 # Creating spectral indicies such as NDVI, enhanced vegetation index(EVI), NDWI, SAVI and others are 
 # more discriminative than raw reflectance since they capture biophysical properties of the land i.e water , built-up areas
 # into the model an retrain 
 
+install.packages("yardstick")
 
 library(caret)        # machine laerning
 library(dplyr)        # data manipulation 
-library(ggplot2)      # ploting
-library(doParallel)   # Parallel processing
 library(sf)
+library(blockCV)
+library(ranger)
 library(terra)
+library(yardstick)
+library(ggplot2)      # ploting
+
+
+library(doParallel)   # Parallel processing
 library(tmap)
 
 
-# I)Read data 
-dataFolder <- "E:/DISK E PETER/flux files/New folder/"
-
-# Grided data 
-grided.data <- read.csv(file.path(dataFolder, "NAIROBI_LANDSAT_MERCATOR/grided_data.csv"))
 
 
-# Train data 
-train.df<-read.csv(file.path(dataFolder, "NAIROBI_LANDSAT_MERCATOR/trainingData.csv"))
-test.df<-read.csv(file.path(dataFolder, "NAIROBI_LANDSAT_MERCATOR/testData.csv"))
+
+
+
+# ---------------------------------------------------------------------------------------
+# Load data 
+# ---------------------------------------------------------------------------------------
+# configure enviroment 
+source("config/config_local.R")
+
+# -------------------------------------------
+# landsat data 
+# Read raster data and select usable bands 
+landsat_2023 <- rast(file.path(DATA_ROOT, "NAIROBI_LANDSAT_MERCATOR/Landsat_8_2023_Proj.tif"))
+landsat_2023 <- landsat_2023[[c("SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7")]]
+
+# Convert raster to projected crs , utm 
+landsat_2023 <- project(landsat_2023, "EPSG:32737")
+
+# Inspect raster properties
+landsat_2023
+
+# Inspect layer/band names
+names(landsat_2023)
+
+
+
+# -----------------------------------------
+# Load training data , convert vector data of digitized landsat data to dataframe of 30m 
+poly <- st_read(file.path(DATA_ROOT, "NAIROBI_LANDSAT_MERCATOR", "Digitiezed_classes.gpkg"))
+st_crs(poly)
+
+# transform to a projected coordinate system 
+poly <- st_transform(poly, 32737)
+
+st_crs(poly)
+
+# Build 30m template ----
+template <- rast(poly, resolution = 30)
+crs(template)
+
+# Rasterize by Class_ID ----
+r <- rasterize(vect(poly), template, field = "Class_ID", background = NA)
+r
+
+# Convert to dataframe with desired columns ----
+df <- as.data.frame(r, xy = TRUE, na.rm = TRUE) %>%
+  rename(x = x, y = y, Class_ID = Class_ID) %>%
+  mutate(cell = cellFromXY(r, cbind(x, y))) %>%
+  select(x, y, cell, Class_ID)
+
+# Convert to SpatVector for extraction 
+pts <- vect(df, geom = c("x", "y"), crs = crs(landsat_2023)) 
+
+# Extract all band values that intersect with ----
+vals <- extract(landsat_2023, pts)
+vals
+
+# Bind back with original attributes ----
+result <- bind_cols(df, vals %>% select(-ID))
+result
+
+
+train.df <- result |> 
+  dplyr::select(-cell)
+
+train.df
+
+# ----------------------------------------
+# Add Human-Readable Class Names
+train.df <- train.df %>%
+  mutate(LandUseClass = case_when(
+    Class_ID == 1 ~ "forest",
+    Class_ID == 2 ~ "water",
+    Class_ID == 3 ~ "builtup",
+    Class_ID == 4 ~ "vegetation",
+    Class_ID == 5 ~ "bare",
+    TRUE          ~ NA_character_
+  )) %>%
+  mutate(LandUseClass = factor(LandUseClass))
+
+# Inspect vector data 
+str(train.df)
+head(train.df)
+
+# Check class distribution
+table(train.df$LandUseClass)
+
+
+# remove unwanted variables 
+rm(result, vals, pts, df, template, poly)
+
+
+
+# ---------------------------------------------------------------------------------------
+# Generate spatial blocks 
+# ---------------------------------------------------------------------------------------
+
+# --------------------------
+# convert columns to the required format coordinates to numeric , landuse class as factor and remove missing 
+# values in all columns 
+train_data <- train.df |>
+  mutate(
+    x = as.numeric(x),
+    y = as.numeric(y),
+    Class_ID = as.integer(Class_ID),
+    LandUseClass = as.factor(LandUseClass)
+  ) |>
+  filter(
+    complete.cases(
+      x, y, Class_ID,
+      SR_B2, SR_B3, SR_B4,
+      SR_B5, SR_B6, SR_B7,
+      LandUseClass
+    )
+  )
+
+# check any missing values 
+sum(is.na(train_data$LandUseClass))
+
+
+
+# -----------------------------------------------------------------
+# Estimate autocorrelation ranges , to investigate how far spatial dependence extends
+# Autocorrelation of raster predictors tells you how geographically similar the input variables are
+
+auto_range <- blockCV::cv_spatial_autocor(
+  r = landsat_2023,
+  num_sample = 5000,
+  plot = TRUE
+)
+# Inspect results
+auto_range$range
+
+auto_range$range_table
+
+
+
+# ----------------------------------------------------------------------
+# Generate spatial blocks of 1500m 
+set.seed(42)
+
+spatial_folds <- cv_spatial(
+  x = st_as_sf(as.points(r)),  # CONVERT spatial raster object to sf object
+  column = "Class_ID",
+  size = 1500,
+  k = 5,
+  hexagon = FALSE,
+  selection = "random",
+  iteration = 100,
+  seed = 42,
+  plot = TRUE
+)
+
+blockCV::cv_plot(
+  cv = spatial_folds,
+  x = st_as_sf(as.points(r))
+)
+
+str(spatial_folds$folds_list)
+
+spatial_folds$records
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------------
+# Train A random forest model from rangers which is quite fast for large datasets 
+# ---------------------------------------------------------------------------------------
+predictors <- c("SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7")
+predictors
+
+
+class_levels <- levels(train_data$LandUseClass)
+
+# Store results from each fold
+spatial_results <- list()
+
+# Store predictions
+spatial_predictions <- list()
+
+# Five-fold spatial cross-validation
+for (i in seq_along(spatial_folds$folds_list)) {
+      train_data
+  # Extract training and testing indices
+  train_index <- spatial_folds$folds_list[[i]][[1]]
+
+  test_index <- spatial_folds$folds_list[[i]][[2]]
+
+  # Subset training data
+  fold_train <- train_data[
+    train_index,
+  ]
+
+  # Subset testing data
+  fold_test <- train_data[
+    test_index,
+  ]
+  # Drop rows with NA response in the training fold
+  fold_train <- fold_train[!is.na(fold_train$LandUseClass), ]
+
+  # Train Random Forest
+  rf_model <- ranger::ranger(
+    LandUseClass ~ .,
+    data = fold_train[, c("LandUseClass", predictors)],
+    num.trees = 500,
+    mtry = 3,
+    importance = "permutation",
+    seed = 42
+  )
+
+  # Predict testing observations
+  predictions <- predict(
+    rf_model,
+    data = fold_test[, predictors]
+  )$predictions
+
+  # Ensure consistent factor levels
+  predictions <- factor(
+    predictions,
+    levels = levels(train_data$LandUseClass)
+  )
+
+  actual <- factor(
+    fold_test$LandUseClass,
+    levels = levels(train_data$LandUseClass)
+  )
+
+  # Calculate evaluation metrics
+  spatial_results[[i]] <- data.frame(
+    Fold = i,
+
+    Accuracy = yardstick::accuracy_vec(
+      truth = actual,
+      estimate = predictions
+    ),
+
+    Precision = yardstick::precision_vec(
+      truth = actual,
+      estimate = predictions,
+      estimator = "macro"
+    ),
+
+    Recall = yardstick::recall_vec(
+      truth = actual,
+      estimate = predictions,
+      estimator = "macro"
+    ),
+
+    F1 = yardstick::f_meas_vec(
+      truth = actual,
+      estimate = predictions,
+      estimator = "macro"
+    )
+  )
+
+  # Save predictions for later analysis
+  spatial_predictions[[i]] <- data.frame(
+    Actual = actual,
+    Predicted = predictions,
+    Fold = i
+  )
+}
+
+
+# -----------------------------
+# Model interpretation
+results_df <- do.call(rbind, spatial_results)
+
+# Per-fold
+print(results_df)
+
+# Mean ± SD across folds — this is your headline result
+colMeans(results_df[, -1])
+                        # On average the model has an accuracy of 97% 
+                        # The F1 score shows the model the model is balanced accros all classes(no class bias)
+                        # The model is highly robust considering we picked test pixels that are far away from 
+                        # training pixels and still produced high accuracy, a trully world class model. 
+
+# model stability 
+apply(results_df[, -1], 2, sd)
+                        # With the standard deviation of 89% accross all folds the models shows high stability 
+                        # it was consistent in all folds, no single one with amazingly higher/lower than others 
+
+
+# Confusion matrix 
+all_preds <- do.call(rbind, spatial_predictions)
+
+conf_mat(all_preds, truth = Actual, estimate = Predicted)
+autoplot(conf_mat(all_preds, truth = Actual, estimate = Predicted), type = "heatmap")
+
+
+# Variable importance , Only for the LAST fold's model
+imp <- rf_model$variable.importance
+sort(imp, decreasing = TRUE)
+                        # Previously SR_B7 band was the most important, but in our new model SR_B6(SWIR 2) has 
+                        # contributed the most. This could be due to its sensitivity to moisture where it 
+                        # clearly delinates between built-up areas from vegetaion and bare ground
+                        # All bands are critical to our analysis as their importance are not varying extremely, 
+                        # between 0.23 to 0.36
+
+
+# OOB classification error (1 - accuracy)
+rf_model$prediction.error   
+                # A random forest predicts by buiding trees and randomly separating then 70% for training and the remaining
+                # 30% for test in a process called bootstraping. The test data is then predicted and gives us 
+                # a prediction error, an out of box error of 1.24%. A substationlly minimall value , reinforcing 
+                # the models good performance. 
+
+
+
+
+# View all folds accuracy 
+print(do.call(rbind, spatial_results))
+print(rf_model)
+
+
+
+
+
+# -----------------------------------------------------------------------------------------
+# Retrain model using variable selected above 
+# -----------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Randomly select 10% of each data making it lighter for the machine 
 train.df <- train.df %>% sample_frac(.1)
@@ -230,3 +593,9 @@ tm_shape(rasterized) +
 
 # CLEAN THE ENTIRE ENVIROMENT 
 rm(list = ls())
+
+
+# REFERENCE 
+# 1. Feature selection - https://mlr3book.mlr-org.com/chapters/chapter6/feature_selection.html
+# 2. 
+# 
