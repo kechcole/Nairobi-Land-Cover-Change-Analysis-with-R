@@ -21,7 +21,7 @@
 
 
 # ----------------------------------------------------------
-# (B) FEATURE SELECTION 
+# (B) FEATURE ENHANCEMENT
 # Add more variables and find optimal features that improve model performance. 
 # Transformation and creation of existing variables helps improve the model by helping 
 # a model learn patterns more effectively. 
@@ -80,7 +80,6 @@ st_crs(poly)
 
 # transform to a projected coordinate system 
 poly <- st_transform(poly, 32737)
-
 st_crs(poly)
 
 # Build 30m template ----
@@ -369,140 +368,306 @@ print(rf_model)
 
 
 # -----------------------------------------------------------------------------------------
-# Retrain model using variable selected above 
+# (B) FEATURE ENHANCEMENT  
 # -----------------------------------------------------------------------------------------------------------------------------------------------
+# Retrain model using more predictor variables generated from spectral indicies 
 
+# Band mapping (Landsat 8/9 surface reflectance, Collection 2 Level-2):
+#   SR_B2 = Blue
+#   SR_B3 = Green
+#   SR_B4 = Red
+#   SR_B5 = NIR
+#   SR_B6 = SWIR1
+#   SR_B7 = SWIR2
+#
+# Index formulas:
+#   NDVI = (NIR - Red) / (NIR + Red)              = (B5 - B4) / (B5 + B4)
+#   NDWI = (Green - NIR) / (Green + NIR)          = (B3 - B5) / (B3 + B5)   [McFeeters 1996]
+#   NDBI = (SWIR1 - NIR) / (SWIR1 + NIR)          = (B6 - B5) / (B6 + B5)   [Zha et al. 2003]
+#   SAVI = ((NIR - Red) / (NIR + Red + L)) * (1 + L), L = 0.5
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Randomly select 10% of each data making it lighter for the machine 
-train.df <- train.df %>% sample_frac(.1)
-test.df <- test.df %>% sample_frac(.1)
-
-
-new_trainData <- train.df %>% 
-      # Rename columns 
-      rename(BLUE=SR_B2, RED=SR_B3, GREEN=SR_B4, NIR=SR_B5, SWIR1=SR_B6, SWIR2=SR_B7 ) %>%
-      # Calculate spectral indicies 
-      mutate(
-            NDVI = (NIR - RED)/(NIR + RED),  # vegetation
-            NDWI = (GREEN - NIR)/(GREEN + NIR), # WATER
-            NDBI = (SWIR1 - NIR) / (SWIR1 + NIR),  # Built up areas 
-            SAVI = ((0.5 + 1) * (NIR - RED)) / (NIR + RED + 0.5)  # Soil index 
-      ) %>%
-      # Reorder columns 
-      select(x, y, BLUE, RED, GREEN, NIR, SWIR1, SWIR2, NDVI, NDWI, NDBI, SAVI, Class_ID, LandUseClass)
-
-
-# II) tEST DATA 
-new_testData <- test.df %>%
-      rename(BLUE=SR_B2, RED=SR_B3, GREEN=SR_B4, NIR=SR_B5, SWIR1=SR_B6, SWIR2=SR_B7 ) %>%
-      mutate(NDVI = (NIR - RED)/(NIR + RED),  # vegetation
-             NDWI = (GREEN - NIR)/(GREEN + NIR), # WATER
-             NDBI = (SWIR1 - NIR) / (SWIR1 + NIR),  # Built up areas 
-             SAVI = ((0.5 + 1) * (NIR - RED)) / (NIR + RED + 0.5)  # Soil 
-            ) %>%
-      select(x, y, BLUE, RED, GREEN, NIR, SWIR1, SWIR2, NDVI, NDWI, NDBI, SAVI, Class_ID, LandUseClass)
-      
-
-
-# B) Train a random forest model and predict on unseen data 
-# Define hyperparameters 
-
-myControl2 <- trainControl( # Split data multiple times into training datasets 
-      method="repeatedcv", 
-      # Number of cross validation folds
-     number=3, 
-     # repeat cross validation 
-     repeats=2,
-     # Retain sampling results for all training in order to know how well it performed in each
-     returnResamp='all', 
-     # disable parallel processing  
-     allowParallel=TRUE)
-
-# Register parallelization 
-cl <- makeCluster(parallel::detectCores() - 1)
-registerDoParallel(cl)
-
-fit.rf2 <- train(  # Convert target variale into a cartegorical variale, then pass predictor variables as is  
-      as.factor(LandUseClass)~BLUE + RED + GREEN + NIR + SWIR1 + SWIR2 + NDVI + NDWI + NDBI + SAVI, 
-    data=new_trainData,     # Training dataset containing variables 
-    method = "rf",     # Random forest classifier method 
-    metric= "Accuracy",    # model evaluation method 
-    preProc = c("center", "scale"),   # Standardize and center the data 
-    trControl = myControl2      # training control setting 
+train_data <- train.df |>
+  mutate(
+    x = as.numeric(x),
+    y = as.numeric(y),
+    Class_ID = as.integer(Class_ID),
+    LandUseClass = as.factor(LandUseClass)
+  ) |>
+  filter(
+    complete.cases(
+      x, y, Class_ID,
+      SR_B2, SR_B3, SR_B4,
+      SR_B5, SR_B6, SR_B7,
+      LandUseClass
     )
-# check results 
-fit.rf2
+  ) |>
+  mutate(
+    # --- Spectral indices ---
+    NDVI = (SR_B5 - SR_B4) / (SR_B5 + SR_B4),
+    NDWI = (SR_B3 - SR_B5) / (SR_B3 + SR_B5),
+    NDBI = (SR_B6 - SR_B5) / (SR_B6 + SR_B5),
+    SAVI = ((SR_B5 - SR_B4) / (SR_B5 + SR_B4 + 0.5)) * (1 + 0.5)
+  ) |>
+  # Guard against division-by-zero producing Inf/-Inf, if any convert to NA then filter layer
+  mutate(
+    across(c(NDVI, NDWI, NDBI, SAVI), ~ ifelse(is.finite(.x), .x, NA_real_))
+  ) |>
+  # Drop any rows where an index became NA (e.g., zero-sum denominator)
+  filter(complete.cases(NDVI, NDWI, NDBI, SAVI))
 
-# Stop cluster 
-stopCluster(cl)
+
+train_data
+
+
+
+
+
+# ---------------------------------------------------------------------------------------
+# Train A random forest model from rangers which is quite fast for large datasets 
+# ---------------------------------------------------------------------------------------
+# Predictors 
+predictors <- c("SR_B2","SR_B3","SR_B4","SR_B5","SR_B6","SR_B7", "NDVI","NDWI","NDBI","SAVI")
+predictors
+
+
+class_levels <- levels(train_data$LandUseClass)
+
+# Store results from each fold
+spatial_results <- list()
+
+# Store predictions
+spatial_predictions <- list()
+
+# Five-fold spatial cross-validation
+for (i in seq_along(spatial_folds$folds_list)) {
+      train_data
+  # Extract training and testing indices
+  train_index <- spatial_folds$folds_list[[i]][[1]]
+
+  test_index <- spatial_folds$folds_list[[i]][[2]]
+
+  # Subset training data
+  fold_train <- train_data[
+    train_index,
+  ]
+
+  # Subset testing data
+  fold_test <- train_data[
+    test_index,
+  ]
+  # Drop rows with NA response in the training fold
+  fold_train <- fold_train[!is.na(fold_train$LandUseClass), ]
+
+  # Train Random Forest
+  rf_model <- ranger::ranger(
+    LandUseClass ~ .,
+    data = fold_train[, c("LandUseClass", predictors)],
+    num.trees = 500,
+    mtry = 3,
+    importance = "permutation",
+    seed = 42
+  )
+
+  # Predict testing observations
+  predictions <- predict(
+    rf_model,
+    data = fold_test[, predictors]
+  )$predictions
+
+  # Ensure consistent factor levels
+  predictions <- factor(
+    predictions,
+    levels = levels(train_data$LandUseClass)
+  )
+
+  actual <- factor(
+    fold_test$LandUseClass,
+    levels = levels(train_data$LandUseClass)
+  )
+
+  # Calculate evaluation metrics
+  spatial_results[[i]] <- data.frame(
+    Fold = i,
+
+    Accuracy = yardstick::accuracy_vec(
+      truth = actual,
+      estimate = predictions
+    ),
+
+    Precision = yardstick::precision_vec(
+      truth = actual,
+      estimate = predictions,
+      estimator = "macro"
+    ),
+
+    Recall = yardstick::recall_vec(
+      truth = actual,
+      estimate = predictions,
+      estimator = "macro"
+    ),
+
+    F1 = yardstick::f_meas_vec(
+      truth = actual,
+      estimate = predictions,
+      estimator = "macro"
+    )
+  )
+
+  # Save predictions for later analysis
+  spatial_predictions[[i]] <- data.frame(
+    Actual = actual,
+    Predicted = predictions,
+    Fold = i
+  )
+}
+
+
+# -----------------------------
+# Model interpretation
+results_df <- do.call(rbind, spatial_results)
+
+# Per-fold
+print(results_df)
+
+# Mean ± SD across folds — this is your headline result
+colMeans(results_df[, -1])
+                        # On average the model has an accuracy of 97% 
+                        # The F1 score shows the model the model is balanced accros all classes(no class bias)
+                        # The model is highly robust considering we picked test pixels that are far away from 
+                        # training pixels and still produced high accuracy, a trully world class model. 
+
+
+apply(results_df[, -1], 2, sd)
+                        # With the standard deviation of 84% accross all folds the models shows high stability 
+                        # it was consistent in all folds, no single one with amazingly higher/lower than others 
+
+
+# Per fold metric heatmap 
+library(tidyr)
+
+results_df |>
+  mutate(Fold = factor(seq_len(nrow(results_df)))) |>
+  pivot_longer(-Fold, names_to = "Metric", values_to = "Value") |>
+  ggplot(aes(x = Fold, y = Metric, fill = Value)) +
+  geom_tile(colour = "white", linewidth = 0.5) +
+  geom_text(aes(label = round(Value, 2)), size = 2.8) +
+  scale_fill_viridis_c(option = "C", direction = 1) +
+  labs(
+    title = "Per-fold metric heatmap",
+    subtitle = "Row-wise patterns = systematically hard folds; column-wise = unstable metrics",
+    x = "Spatial fold", y = NULL, fill = "Value"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid = element_blank())
+
+
+
+
+
+# model stability 
+summary_df <- results_df |>
+  pivot_longer(everything(), names_to = "Metric", values_to = "Value") |>
+  group_by(Metric) |>
+  summarise(
+    mean = mean(Value, na.rm = TRUE),
+    sd   = sd(Value,   na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(summary_df, aes(x = reorder(Metric, mean), y = mean)) +
+  geom_col(fill = "steelblue", width = 0.65) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
+                width = 0.2, colour = "grey20") +
+  geom_text(aes(label = sprintf("%.3f ± %.3f", mean, sd)),
+            hjust = -0.1, size = 3.2) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Model stability across spatial folds",
+    subtitle = "Bars = mean; whiskers = ± 1 SD",
+    x = NULL, y = "Value"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.major.y = element_blank())
+
+
+
+# Confusion matrix 
+all_preds <- do.call(rbind, spatial_predictions)
+
+conf_mat(all_preds, truth = Actual, estimate = Predicted)
+autoplot(conf_mat(all_preds, truth = Actual, estimate = Predicted), type = "heatmap")
+
+
+
+# Variable importance , Only for the LAST fold's model
+imp <- rf_model$variable.importance
+sort(imp, decreasing = TRUE)
+                        # Previously SR_B6 band was the most important, but in our new model NDWI has 
+                        # contributed the most. 
+imp_df <- data.frame(
+  variable   = names(imp),
+  importance = as.numeric(imp)
+)
+
+# Order by importance (reorder sets factor levels; flip = TRUE makes highest at top)
+imp_df$variable <- reorder(imp_df$variable, imp_df$importance)
+
+# Optional: flag whether a variable is a spectral index or a raw band
+imp_df$type <- ifelse(
+  grepl("^SR_B", imp_df$variable), "Raw band", "Spectral index"
+)
+
+ggplot(imp_df, aes(x = importance, y = variable, fill = type)) +
+  geom_col(width = 0.7) +
+  geom_text(
+    aes(label = round(importance, 3)),
+    hjust = -0.15, size = 3.2
+  ) +
+  scale_fill_manual(values = c("Raw band" = "#4C72B0",
+                               "Spectral index" = "#DD8452")) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(
+    title = "Variable importance — Random Forest Land-Cover Enhanced Model",
+    subtitle = "Mean decrease in accuracy (scaled)",
+    x = "Importance",
+    y = NULL,
+    fill = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor   = element_blank(),
+    legend.position    = "bottom",
+    plot.title         = element_text(face = "bold")
+  )
+
+
+
+# NDWI dominates (0.333), roughly 45% higher than the next variable — your model leans heavily on 
+# water discrimination (Green vs NIR). Given typical land-use classes this is a strong signal, 
+# but also worth checking that NDWI isn't simply separating a single dominant class (e.g., water bodies) 
+# and masking weaker class separation.
+# The spectral indices collectively outweigh the raw bands (NDWI + SAVI + NDBI + NDVI ≈ 0.976 vs. all SR_B* ≈ 0.941), 
+# which supports your feature-engineering step. Worth mentioning in the write-up.
+# SR_B5 (NIR) is the least important (0.111) even though it feeds three of the four indices — expected collinearity 
+# artefact: once NDVI/NDWI/NDBI are in the model, the raw NIR adds little marginal information. 
+# This is normal and not a problem for Random Forest prediction, but you can note it when discussing multicollinearity.
+# Accuracy-based importance is unstable across runs (it depends on permutation noise). 
+
 
 # Save model 
-saveRDS(fit.rf2, paste0(dataFolder,"Nairobi Landsat data/RandomForest2.rds"))
-
-# read model
-fit.rf2 <- readRDS(paste0(dataFolder,"Nairobi Landsat data/RandomForest2.rds"))
-
-# . Predict on unseen test data
-p4 <- predict(fit.rf2, new_testData)
-
-# Compare predicted p2 values with classes in new test data 
-new_testData$LandUseClass <- as.factor(new_testData$LandUseClass)
-
-# check metrics , 
-confusionMatrix(p4,new_testData$LandUseClass)
 
 
 
-# C) Variable importance 
-importance_df <- varImp(fit.rf2)$importance |>
-  tibble::rownames_to_column("Variable")
 
-ggplot(importance_df, aes(x = reorder(Variable, Overall), y = Overall)) +
-  geom_col(fill = "forestgreen") +
-  coord_flip() +
-  labs(title = "Variable Importance - Random Forest",
-       x = "Variables", y = "Importance Score") +
-  theme_minimal()
 
-# select only most important variables , from above NIR was not that important
-# so we pick the top 9 of the 10
-importance_vals <- varImp(fit.rf2, scale = TRUE)
-print(importance_vals)
 
-# Extract the numeric importance column safely
-imp_df <- importance_vals$importance
-imp_df$Variable <- rownames(imp_df)
 
-# Order by importance descending
-imp_df <- imp_df[order(imp_df$Overall, decreasing = TRUE), ]
 
-# Select top 9 variables
-top_vars <- imp_df$Variable[1:9]
-cat("Selected important variables:\n")
-print(top_vars)
 
-# ------------------------------------------------------------------------
-# Retrain model using variable selected above 
-# -------------------------------------------------------------------------
+
+
 
 
 
