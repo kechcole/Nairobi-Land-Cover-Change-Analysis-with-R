@@ -5,7 +5,7 @@
 # ----------------------------------------------------------
 # (A) MODEL IMPROVEMENTS THROUGH SPATIAL CROSS VALIDATION 
 
-#  Train the model using spatial cross-validation to avoid inflated accuracy estimates (caused by spatial autocorrelation)
+#  Train the model, with 2023 image, using spatial cross-validation to avoid inflated accuracy estimates (caused by spatial autocorrelation)
 #  as observed in our previous model where it predicted over 98% of the features during training and testing. 
 # Such high/inflated values are commonly attributed to spatial autocorrelation, a phenomena where pixels within the same proximity 
 # have similar characteristics. Thus when modelling, a model encounters similar spectral characteristics as training
@@ -28,6 +28,17 @@
 # Creating spectral indicies such as NDVI, enhanced vegetation index(EVI), NDWI, SAVI and others are 
 # more discriminative than raw reflectance since they capture biophysical properties of the land i.e water , built-up areas
 # into the model an retrain 
+
+
+
+
+# =======================================================================
+# (C) Test on unseen data 
+# Test the model developed on the 2018 image 
+
+
+
+
 
 install.packages("yardstick")
 
@@ -57,7 +68,7 @@ library(tmap)
 source("config/config_local.R")
 
 # -------------------------------------------
-# landsat data 
+# 2023 landsat image 
 # Read raster data and select usable bands 
 landsat_2023 <- rast(file.path(DATA_ROOT, "NAIROBI_LANDSAT_MERCATOR/Landsat_8_2023_Proj.tif"))
 landsat_2023 <- landsat_2023[[c("SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7")]]
@@ -134,13 +145,13 @@ head(train.df)
 table(train.df$LandUseClass)
 
 
-# remove unwanted variables 
+# clean enviroment by removing variables no longer in use 
 rm(result, vals, pts, df, template, poly)
 
 
 
 # ---------------------------------------------------------------------------------------
-# Generate spatial blocks 
+# A) Generate spatial blocks 
 # ---------------------------------------------------------------------------------------
 
 # --------------------------
@@ -184,7 +195,7 @@ auto_range$range_table
 
 
 # ----------------------------------------------------------------------
-# Generate spatial blocks of 1500m 
+# Generate spatial blocks of 1500m as indicated by the median of values above 
 set.seed(42)
 
 spatial_folds <- cv_spatial(
@@ -216,6 +227,10 @@ spatial_folds$records
 # ---------------------------------------------------------------------------------------
 # Train A random forest model from rangers which is quite fast for large datasets 
 # ---------------------------------------------------------------------------------------
+# Trains five separate Random Forest models using five-fold spatial cross-validation with ranger module 
+
+
+# select predictor variables 
 predictors <- c("SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7")
 predictors
 
@@ -426,7 +441,7 @@ train_data
 # Train A random forest model from rangers which is quite fast for large datasets 
 # ---------------------------------------------------------------------------------------
 # Predictors 
-predictors <- c("SR_B2","SR_B3","SR_B4","SR_B5","SR_B6","SR_B7", "NDVI","NDWI","NDBI","SAVI")
+predictors <- c("SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7", "NDVI", "NDWI", "NDBI", "SAVI")
 predictors
 
 
@@ -656,102 +671,205 @@ ggplot(imp_df, aes(x = importance, y = variable, fill = type)) +
 # Accuracy-based importance is unstable across runs (it depends on permutation noise). 
 
 
+# --------------------------------------------------------------------------------
 # Save model 
+# --------------------------------------------=--===================
+# Train and save the final random forest model, its configurations and spatial cross validation results 
+# These are the model artifacts that can be used for future references(reporting and analysis)
+
+
+# Train the final model
+# Keep observations with complete response and predictors
+final_train_data <- train_data[
+  complete.cases(train_data[, c("LandUseClass", predictors)]),
+]
+
+# Ensure response is a factor with consistent levels
+final_train_data$LandUseClass <- factor(
+  final_train_data$LandUseClass,
+  levels = class_levels
+)
+
+# Train final model using all available training observations
+final_rf_model <- ranger::ranger(
+  LandUseClass ~ .,
+  data = final_train_data[, c("LandUseClass", predictors)],
+  num.trees = 500,
+  mtry = 3,
+  importance = "permutation",
+  seed = 42
+)
+
+
+# Save the model and its artifacts 
+# Create model package
+landcover_model <- list(
+
+  model = final_rf_model,
+
+  predictors = predictors,
+
+  class_levels = class_levels,
+
+  parameters = list(
+    algorithm = "Random Forest",
+    num.trees = 500,
+    mtry = 3,
+    importance = "permutation",
+    seed = 42
+  ),
+
+  training_date = Sys.Date(),
+
+  training_observations = nrow(final_train_data)
+)
+
+
+
+# Save model using your specified path
+# Build the path using getwd()
+getwd()
+
+model_path <- file.path(getwd(), "Models", "randomforest.rds")
+
+# Save the model
+saveRDS(landcover_model, file = model_path)
+
+# Confirm the file exists
+file.exists(model_path) 
+
+getwd()
+
+
+# clean enviroment 
+rm(list = ls())
 
 
 
 
 
+# ------------------------------------------------------------------------------------------
+# Test the model on unseen image of 2018 of the same location
+# -------------------------------------------------------------------------------------------
+
+# Retrieve the saved random forest model and predict the classes of an image 
+landcover_RF_model <- readRDS(file.path(getwd(), "Models/randomforest.rds"))
+
+
+# get individual components 
+# parameters used 
+rf_model <- landcover_RF_model$model
+rf_model
+
+# predictors used 
+predictors <- landcover_RF_model$predictors
+predictors
+
+# class levels 
+class_levels <- landcover_RF_model$class_levels
+class_levels
+
+# Specific Training metadata
+parameters            <- landcover_RF_model$parameters
+parameters
+
+training_date         <- landcover_RF_model$training_date
+training_date
+
+training_observations <- landcover_RF_model$training_observations
+training_observations
 
 
 
 
+# -------------------------------------------------------------
+# Test model on unseen data 
+# -------------------------------------------
+# 2018 landsat image 
+# Read raster data and select usable bands 
+landsat_2018 <- rast(file.path(DATA_ROOT, "NAIROBI_LANDSAT_MERCATOR/Landsat_8_2018_Proj.tif"))
+print(landsat_2018)
+
+landsat_2018 <- landsat_2018[[c("SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7")]]
+
+# Reproject raster to local projected crs 
+landsat_2018 <- project(landsat_2018, "EPSG:32737")
+
+# Inspect raster properties
+landsat_2018
+
+# Inspect layer/band names
+names(landsat_2018)
+
+
+# --------------------------------------------------------------
+# generate other variables, spectral indicies expected by the model 
+# ----------------------------------------------------------------------------
+b2 <- landsat_2018[["SR_B2"]]   # Blue
+b3 <- landsat_2018[["SR_B3"]]   # Green
+b4 <- landsat_2018[["SR_B4"]]   # Red
+b5 <- landsat_2018[["SR_B5"]]   # NIR
+b6 <- landsat_2018[["SR_B6"]]   # SWIR1
+b7 <- landsat_2018[["SR_B7"]]   # SWIR2
+
+# NDVI
+ndvi <- (b5 - b4) / (b5 + b4)
+names(ndvi) <- "NDVI"
+
+# NDWI (McFeeters — green vs NIR; water is positive)
+ndwi <- (b3 - b5) / (b3 + b5)
+names(ndwi) <- "NDWI"
+
+# NDBI (built-up; SWIR1 vs NIR)
+ndbi <- (b6 - b5) / (b6 + b5)
+names(ndbi) <- "NDBI"
+
+# SAVI (L = 0.5)
+L <- 0.5
+savi <- ((b5 - b4) / (b5 + b4 + L)) * (1 + L)
+names(savi) <- "SAVI"
+
+# Stack bands + indices, in model's expected order 
+landsat_2018 <- c(landsat_2018, ndvi, ndwi, ndbi, savi)
+landsat_2018
+
+# Enforce exact predictor order/names from the model
+landsat_2018 <- landsat_2018[[landcover_RF_model$predictors]]
+
+# Sanity check
+stopifnot(identical(names(landsat_2018),landcover_RF_model$predictors))
+print(names(landsat_2018))
 
 
 
+# -----------------------------------------------------------------------
+# Predict classification of the 2018 image 
+predicted_2018 <- terra::predict(
+  landsat_2018,
+  landcover_RF_model$model,
+  na.rm = TRUE,
+  cores = 1
+)
+
+# What values does the raster hold?
+freq(predicted_2018)
+levels(predicted_2018) 
+
+# plot classified image 
+# display names, in the SAME order as lvls
+class_labels <- c("bare", "builtup", "forest", "vegetation", "water")  # <-- match lvls order
+class_colors <- c("#DAA520",   "#8B0000",  "#056d05", "#82eb82",  "#1E90FF") # <-- match lvls order
 
 
+plot(
+  predicted_2018,
+  col    = class_colors,
+  type   = "classes",
+  main   = "Predicted Land Cover 2018",
+  plg    = list(legend = class_labels, title = "Class", cex = 0.8)
+)
 
 
-
-
-
-
-
-
-# -------------------------------------------------------------------------------
-# Predict at grid location and convert to raster 
-# -------------------------------------------------------------------------------
-# Grided data is organised into cells(pixels) covering a geographical area defined by x and y coordinates 
-# and put in dataframe format. 
-# Each cell represents an area on the ground (30m x 30m) and store other spectral variables 
-# such as ndvi, red, green, blue, swir bands. 
-# Data is extracted from landsat image in which we will predict their classes 
-
-# i) Prepare grided data 
-new_gridData <- grided.data %>% 
-      # Rename columns because the columns must be similar to the one used in training data 
-      rename(BLUE=SR_B2, RED=SR_B3, GREEN=SR_B4, NIR=SR_B5, SWIR1=SR_B6, SWIR2=SR_B7 ) %>%
-      # Calculate spectral indicies 
-      mutate(
-            NDVI = (NIR - RED)/(NIR + RED),  # vegetation
-            NDWI = (GREEN - NIR)/(GREEN + NIR), # WATER
-            NDBI = (SWIR1 - NIR) / (SWIR1 + NIR),  # Built up areas 
-            SAVI = ((0.5 + 1) * (NIR - RED)) / (NIR + RED + 0.5)  # Soil index 
-      ) %>%
-      # Reorder columns 
-      select(x, y, BLUE, RED, GREEN, NIR, SWIR1, SWIR2, NDVI, NDWI, NDBI, SAVI)
-
-head(new_gridData, 10)
-
-
-# ii) Load the model and view properties inclusing accuracy , samples used, variables , tuning parameters 
-randFstModel <- readRDS(paste0(dataFolder,"RandomForest2.rds"))
-print(randFstModel)
-
-
-# iii) Predict at grid locations, predict the class for each cell  
-# the prediction is a dataframe with 1 column containing predicted class 
-p4 <- as.data.frame(predict(randFstModel, newdata = new_gridData))
-
-# Extract predicted landuse class contained in a prediction4 and append to dataframe
-new_gridData$PredLandUse <- p4$predict
-str(new_gridData)
-
-# Get class id , a new column containing class ID of the predicted values 
-new_gridData <- new_gridData %>% 
-                     mutate(Class_ID = case_when(
-                              PredLandUse == "water" ~ 2,
-                              PredLandUse == "vegetation" ~ 4,
-                              PredLandUse == "builtup" ~ 3,
-                              PredLandUse == "bare" ~ 5,
-                              TRUE ~ 1      # forest
-                           ))
-names(new_gridData)
-
-
-# iv) Define raster extent and resolution similar to landsat image then 
-# rasterize the sf object
-# Convert df to sf object , coordinates x & y will be put to geometry column 
-sf_data <- st_as_sf(new_gridData, coords = c("x", "y"), crs = 3395)
-names(sf_data)
-
-r <- rast(ext(sf_data), resolution = 30, crs = "EPSG:3395")
-rasterized <- rasterize(sf_data, r, field = "Class_ID")
-
-
-# v) Plot with tmap
-# Define class labels and matching colors
-class_labels <- c("Vegetation", "Water", "Built-up", "Grassland", "Bare Land")
-class_colors <- c("#056d05", "#1E90FF", "#8B0000", "#82eb82", "#DAA520")
-
-# Assign raster categories explicitly
-levels(rasterized) <- data.frame(ID = 1:5, Class = class_labels)
-
-# Create the map with a properly positioned legend
-tm_shape(rasterized) +
-  tm_raster(palette = class_colors, title = "Land Cover", style = "cat") +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "right")
 
 
 
